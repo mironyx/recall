@@ -86,14 +86,14 @@ graph TD
 
 ### Transport
 - **Purpose:** Terminate the Streamable HTTP MCP connection and dispatch tool calls.
-- **Responsibilities:** parse and validate the MCP envelope; assign `request_id`, `trace_id`, `span_id`; hand the call to Auth; serialise responses and errors.
+- **Responsibilities:** parse and validate the MCP envelope; assign `request_id`, `trace_id`, `span_id`; hand the call to Auth; serialise responses and errors; expose `/healthz` (liveness) and `/readyz` (readiness, including DB and embeddings provider reachability) per S5.4.
 - **Non-responsibilities:** no business logic; no knowledge of memory semantics; no direct DB access.
 - **Depends on:** Auth, Tool Router, Observability.
 
 ### Auth
 - **Purpose:** Resolve the caller's `user_id` from a shared bearer token per request and reject unauthenticated calls.
-- **Responsibilities:** bearer-token lookup; `user_id` injection into the call context; hard-reject when no `user_id` resolves.
-- **Non-responsibilities:** not an identity provider; no role/permission model beyond presence of a valid token; no project-level ACLs.
+- **Responsibilities:** bearer-token lookup; `user_id` injection into the call context; hard-reject when no `user_id` resolves; enforce the S3.6 rule that a `project_id` is required on every call **except** `memory_save` / `memory_search` / `memory_get` operating on `scope=global` records.
+- **Non-responsibilities:** not an identity provider; no role/permission model beyond presence of a valid token; no project-level ACLs; no per-user filtering within a project — by default any user in a project sees that project's memories (S3.4); per-user privacy is deferred to v3.
 - **Depends on:** an out-of-band token configuration source.
 
 ### Project Registry
@@ -104,7 +104,7 @@ graph TD
 
 ### Tool Router
 - **Purpose:** Expose the five MCP tools and translate them into Memory Service calls.
-- **Responsibilities:** declare tool schemas and descriptions (the API docs for the LLM); validate arguments; enforce the scope/project_id mutual-exclusion at the tool boundary; shape structured `{error, hint}` responses.
+- **Responsibilities:** declare tool schemas and descriptions (the API docs for the LLM); validate arguments; enforce the scope/project_id mutual-exclusion at the tool boundary; shape structured `{error, hint}` responses; carry the S1.8 decision rule verbatim in the `memory_save` description (*"global = still true and useful in any other repo tomorrow; project = otherwise. When in doubt, project."*); document the `kind` vocabulary (`decision`, `episode`, `component`, `gotcha`, `pattern`, `instruction`) as a free-form string with a recommended set — adding a kind is a config change, not a code change (S2.2).
 - **Non-responsibilities:** no persistence; no embedding; no ranking logic.
 - **Depends on:** Memory Service, Project Registry, Observability.
 
@@ -139,9 +139,9 @@ graph TD
 - **Depends on:** Postgres.
 
 ### Compactor
-- **Purpose:** Run the LLM-driven instruction compaction job (S4.6) and the near-duplicate flagging pass of garbage collection (S6.7).
-- **Responsibilities:** enumerate candidate instructions via Memory Service; call the compaction LLM; merge/drop/priority-update via Memory Service; be invokable via CLI and safe to schedule.
-- **Non-responsibilities:** not part of the request path; no MCP surface.
+- **Purpose:** Run the LLM-driven instruction compaction job (S4.6) and the garbage-collection passes from S6.7 — (a) prune memories the agent never re-reads, (b) flag near-duplicates for merge, and (d) the instruction compaction itself. Sub-feature (c) — LLM-driven scope reclassification — is explicitly deferred.
+- **Responsibilities:** enumerate candidate instructions via Memory Service; call the compaction LLM; merge/drop/priority-update via Memory Service; run the prune-unread pass against access metadata; flag near-duplicates without auto-merging; be invokable via CLI and safe to schedule.
+- **Non-responsibilities:** not part of the request path; no MCP surface; does not reclassify scope in v1.
 - **Depends on:** Memory Service, Compaction LLM provider.
 
 ### Exporter
@@ -153,6 +153,11 @@ graph TD
 - **Purpose:** `recall …` command group that fronts Migrations, Compactor, Exporter, and `serve`.
 - **Responsibilities:** argument parsing; env-var resolution; invoking the right component.
 - **Non-responsibilities:** no business logic beyond dispatch.
+
+### Deployment artefacts
+- **Purpose:** Make the server runnable as shared infrastructure with minimal friction.
+- **Responsibilities:** ship a `docker compose` file that brings up Postgres+pgvector and Recall for local development (S5.2); ship an MCP client config snippet operators can paste into Claude Code / Cursor (S5.6); document the env-var contract from S5.1.
+- **Non-responsibilities:** Helm chart and k8s manifests (S5.3) are explicitly deferred beyond v1 — listed here as a known gap, not a v1 deliverable.
 
 ### External boundaries
 - **Embeddings Provider** — sentence-transformers (in-process) or any OpenAI-compatible HTTP endpoint.
