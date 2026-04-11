@@ -54,8 +54,8 @@ If the epic body already has a task checklist with linked issues, use those. Oth
 
    ## BDD specs
    ```
-   describe('...')
-     it('...')
+   class TestContext:
+       def test_behaviour_given_when_then(self) -> None: ...
    ```
    EOF
    )" --label L5-implementation
@@ -74,10 +74,10 @@ docs/design/lld-<epic-slug>-<task-slug>.md
 Each LLD is a standalone file (not a section in a phase file). Include:
 
 - Document control with parent epic reference
-- Layers (DB / BE / FE) as applicable
+- Layers (DB / BE) as applicable
 - HLD coverage assessment — reference, do not duplicate
 - Implementation detail: file paths, internal types, function signatures
-- Internal decomposition for API routes (mandatory per existing guidelines)
+- Internal decomposition for non-trivial components (MCP tool handlers, services, store wrappers)
 - BDD specs and acceptance criteria
 - Single task at the bottom (the task this LLD covers)
 
@@ -123,11 +123,14 @@ Check each of the following and note findings:
 | Check | What to look for |
 |-------|-----------------|
 | **Stale file paths** | LLD references files that have been moved, renamed, or deleted |
-| **Pattern drift** | Codebase has adopted new patterns (e.g. `ApiContext`, new auth helpers) that the LLD predates |
+| **Pattern drift** | Codebase has adopted new patterns (store wiring, tool-handler shape, namespace helpers) that the LLD predates |
 | **ADR conflicts** | Design contradicts a decision recorded in `docs/adr/` after the design was written |
 | **Thin contracts** | Function signatures, types, or internal decomposition are vague or missing — would block a `/feature` agent |
 | **Missing BDD specs** | No `describe`/`it` blocks for an agent to implement against |
 | **Uncovered acceptance criteria** | Acceptance criteria in the issue have no corresponding design detail |
+| **Missing behavioural flows** | Multi-component interactions lack sequence diagrams — reviewer cannot build theory from text alone |
+| **Missing structural overview** | Task introduces/modifies module boundaries but has no structural diagram showing dependencies |
+| **Unverifiable invariants** | Constraints listed without a verification method (test, type check, grep), or invariants scattered inline instead of collected in the Invariants table |
 
 ### Review Step 3: Report and optionally patch
 
@@ -241,17 +244,20 @@ Use `/create-adr` to produce the ADR. Provide the context, options, and recommen
 
 #### LLD section (implementation item with contracts)
 
-Follow the LLD template from `/lld`:
+Follow the LLD template from `/lld` (Part A + Part B structure):
 
-- Identify layers (DB / BE / FE)
+**Part A (human-reviewable):**
+- Purpose — what this section delivers
+- Behavioural flows — mermaid sequence diagrams for multi-component interactions
+- Structural overview — mermaid class/module diagram when introducing or modifying module boundaries
+- Invariants — hard constraints with verification methods, collected in a table
+- Acceptance criteria + BDD specs
+
+**Part B (agent-implementable):**
+- Identify layers (DB / BE)
 - Reference HLD sections — do not duplicate
 - Add implementation-level detail: file paths, internal types, function signatures
-- **API route internal decomposition is mandatory** — every API route LLD must include an explicit internal decomposition section specifying the controller/service split. The pattern is:
-  - Controller (route.ts, ≤ 5 lines): calls `createApiContext(request)`, validates body, delegates to service
-  - Service (service.ts): receives `ApiContext`, performs auth checks via `ctx.supabase`, writes via `ctx.adminSupabase`
-  - Constraint: service never calls `createClient()` or any infrastructure factory — `ApiContext` is injected by the controller
-  - See the LLD template's "Internal decomposition" section for the full pattern
-- Include internal decomposition for non-trivial components
+- Include internal decomposition for non-trivial components (MCP tool handlers, services, store wrappers)
 - Write BDD specs and acceptance criteria
 - Append tasks sized for single `/feature` cycles (< 200 lines)
 
@@ -314,4 +320,4 @@ After all items are processed, summarise:
 - **Respect existing decisions.** Read ADRs before proposing new ones — the decision may already be recorded.
 - **Repo docs are source of truth.** GitHub issue bodies are convenient but not version-controlled. Every item that `/feature` will implement must have its design detail (fix approach, BDD specs, acceptance criteria) traceable to a file in `docs/`. Issue bodies reference these docs — they do not replace them.
 - **Check before creating.** Always check for existing issues and design docs before creating new ones. Duplicate artefacts cause confusion.
-- **API route items always get internal decomposition.** If a plan item involves an API route, the LLD section must include an explicit internal decomposition (controller/service split with `createApiContext` + `ApiContext` injection). Without this, `/feature` agents miss the established pattern and produce routes that call auth helpers and infrastructure factories directly. See `src/lib/api/context.ts` for the composition root and any existing `service.ts` file under `src/app/api/` for the pattern.
+- **MCP tool handlers stay thin.** Tool handlers should parse inputs, delegate to a service function, and return. Business logic, store calls, and embedding work belong in services or store wrappers — not in the handler body. The LLD for any new tool must name the handler, the service function it delegates to, and the store/embedding boundaries it crosses.
