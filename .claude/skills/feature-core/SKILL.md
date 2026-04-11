@@ -43,8 +43,10 @@ If the hook fires with inline findings during the cycle, address them before mov
 2. Check `tests/fixtures/` and `tests/helpers/` for anything already extracted.
 3. **If the pattern you need already exists, import it** — never copy-paste boilerplate.
 4. **If you are about to write a helper that looks similar to one in a neighbouring test
-   file, extract both into `tests/fixtures/<topic>-mocks.ts` first**, then import from
-   both places. Do this in the same commit as the new tests.
+   file, extract both into `tests/fixtures/<topic>.py` first**, then import from
+   both places. Do this in the same commit as the new tests. For integration tests
+   that need a real store, use a shared pytest fixture in `tests/conftest.py` or
+   `tests/integration/conftest.py` — never build a `testcontainers` Postgres per test.
 
 Duplicated mock setup is tech debt the moment it's written — cheaper to extract up front
 than after the evaluator or a reviewer catches it.
@@ -62,54 +64,49 @@ Continue until all acceptance criteria are covered. One acceptance criterion per
 Run all checks. **All must pass — zero failures, including integration tests — before proceeding.**
 
 ```bash
-npx vitest run                                   # full suite — unit + integration, not just new tests
-npx tsc --noEmit                                 # no type errors
-npm run lint                                     # no lint errors
-npx markdownlint-cli2 "**/*.md" 2>&1 | tail -5   # no markdown lint errors
+uv run pytest                                    # full suite — unit + integration, not just new tests
+uv run mypy                                      # strict mode — no type errors
+uv run ruff check .                              # lint — no errors
+uv run ruff format --check .                     # format — no drift
 ```
 
-**Run the full suite, not just the test files you wrote.** `npx vitest run` with no filter runs
+**Run the full suite, not just the test files you wrote.** `uv run pytest` with no filter runs
 every test in the repo. If you see pre-existing failures, they are your problem — fix them.
 
-**Integration test failures are not pre-existing — fix them.** If `npx vitest run` reports
-failures in `*.integration.test.ts` files, diagnose and resolve before continuing. Do not
-dismiss integration failures as "unrelated to this PR" and proceed to create the PR.
-
-If E2E tests exist (`tests/e2e/` is non-empty), also run:
-
-```bash
-NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co \
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=placeholder-publishable-key \
-  SUPABASE_SECRET_KEY=placeholder-secret-key \
-  npm run build && npx playwright test
-```
-
-If any fail, fix and re-run. If stuck after 3 attempts on the same failure, pause and report.
+**Integration test failures are not pre-existing — fix them.** If `uv run pytest` reports
+failures under `tests/integration/` (tests marked `@pytest.mark.integration`), diagnose and
+resolve before continuing. Do not dismiss integration failures as "unrelated to this PR" and
+proceed to create the PR. Integration tests hit a real Postgres via testcontainers — if they
+fail, something is actually broken.
 
 ### Step 5b: Silent-swallow check (blocking gate)
 
-Before proceeding, grep for catch blocks that swallow errors without logging or user feedback:
+Before proceeding, grep for `except` blocks that may swallow errors without logging
+or re-raise:
 
 ```bash
-grep -rn "catch" src/ --include="*.ts" | grep -v "logger\.\|console\.\|setError\|throw\|// fire-and-forget"
+grep -rn -E "^\s*except( [A-Za-z_.]+( as [a-z_]+)?)?:" src/recall/ \
+  | grep -v "logger\.\|log\.\|raise\b"
 ```
 
-Any match must be resolved — add logging, surface the error, or add a `// fire-and-forget` justification comment. Do not proceed to Step 6 with unguarded catch blocks.
+Any match must be resolved — narrow the exception, add `logger.exception(...)`, and either
+recover or `raise`. A bare `except:` or `except Exception:` is never acceptable in `src/`.
+Do not proceed to Step 6 with unguarded except blocks.
 
 ### Step 6: Diagnostics (blocking gate)
 
 Run `/diag` on all files changed in this cycle. This is a **blocking gate** — do not proceed to Step 7 until clean.
 
-**Both `src/` and `tests/` files must be checked.** CodeScene analyses test files and flags Code
-Duplication in them (repeated `it()` blocks, repeated arrange/render patterns). These warnings
-are blocking — fix them before proceeding to Step 7.
+**Both `src/` and `tests/` files must be checked.** Analysers flag Code Duplication in test
+files (repeated fixtures, repeated arrange/act/assert scaffolding). These warnings are
+blocking — fix them before proceeding to Step 7.
 
 Then:
 
 1. Run `/diag` on all changed files — including every modified test file under `tests/`.
-2. If any findings exist, fix them all. **Exception: ignore smells on generated files** (e.g. `supabase/migrations/`) — CodeScene exclusions are configured but may not cover every generated file.
+2. If any findings exist, fix them all.
 3. After fixing, re-run `/diag` to confirm the findings are gone — do not assume a fix worked without seeing the updated diagnostics.
-4. Repeat until `/diag` reports zero findings on non-generated files.
+4. Repeat until `/diag` reports zero findings.
 5. Re-run Step 5 (full verification) after any fixes.
 
 Only proceed to Step 6b when `/diag` reports zero findings on non-generated files.
@@ -134,7 +131,7 @@ Input: lld_path=<path> issue_number=<N> changed_files=<list> test_files=<list>
 - **PASS WITH WARNINGS** — review warnings. Fix quick wins; note the rest in the PR body. Proceed to Step 7.
 - **FAIL** — read the failed adversarial tests and silent failure risks. Fix the implementation to address each finding. After fixing, re-run Step 5 (full verification) and Step 6 (`/diag`). Do NOT re-run the evaluator — proceed to Step 7 after verification passes.
 
-The evaluator writes tests to `tests/evaluation/<slug>.eval.test.ts`. These files are committed alongside the feature code in Step 7 — they serve as ongoing regression protection.
+The evaluator writes tests to `tests/evaluation/test_<slug>_eval.py`. These files are committed alongside the feature code in Step 7 — they serve as ongoing regression protection.
 
 ### Step 7: Commit
 
@@ -151,13 +148,7 @@ One commit per issue. Do not batch multiple issues.
 
 ```bash
 git push -u origin HEAD
-```
-
-Create the PR first with a placeholder Usage section, then run the cost script once after the PR
-exists so labels are applied to both issue and PR in a single call, and patch the body.
-
-```bash
-PR_URL=$(gh pr create --title "<short title>" --base main --body "$(cat <<'EOF'
+gh pr create --title "<short title>" --base main --body "$(cat <<'EOF'
 ## Summary
 <1-3 bullet points of what was implemented>
 
@@ -168,44 +159,16 @@ Closes #<number>
 <path to design doc section>
 
 ## Test plan
-- [ ] `npx vitest run` — all tests pass
-- [ ] `npx tsc --noEmit` — clean
-- [ ] `npm run lint` — clean
+- [ ] `uv run pytest` — all tests pass (unit + integration)
+- [ ] `uv run mypy` — clean
+- [ ] `uv run ruff check .` — clean
 - [ ] Design contracts verified (field names, types, schemas match)
 
 ## Verification
 - **Tests added:** N
 - **Total tests:** N (M test files)
-
-## Usage
-- **Cost:** TBD
-- **Tokens:** TBD
-- **Time to PR:** TBD
 EOF
-)")
-
-PR_NUMBER=$(echo "$PR_URL" | grep -o '[0-9]*$')
-
-# Single cost script call — applies labels to issue + PR and outputs cost summary
-COST_OUTPUT=$(.claude/hooks/run-python.sh scripts/query-feature-cost.py FCS-<issue-number> --issue <issue-number> --pr $PR_NUMBER --stage pr)
-
-# Patch the PR body with the actual cost figures (replace TBD placeholders)
-COST_LINE=$(echo "$COST_OUTPUT" | grep '^\- \*\*Cost:')
-TOKEN_LINE=$(echo "$COST_OUTPUT" | grep '^\- \*\*Tokens:')
-TIME_LINE=$(echo "$COST_OUTPUT" | grep '^\- \*\*Time to PR:')
-CURRENT_BODY=$(gh pr view $PR_NUMBER --json body -q '.body')
-UPDATED_BODY=$(echo "$CURRENT_BODY" | .claude/hooks/run-python.sh -c "
-import sys
-cost_line = '''$COST_LINE'''
-token_line = '''$TOKEN_LINE'''
-time_line = '''$TIME_LINE'''
-body = sys.stdin.read()
-body = body.replace('- **Cost:** TBD', cost_line)
-body = body.replace('- **Tokens:** TBD', token_line)
-body = body.replace('- **Time to PR:** TBD', time_line)
-print(body, end='')
-")
-gh api repos/{owner}/{repo}/pulls/$PR_NUMBER --method PATCH -f body="$UPDATED_BODY" > /dev/null
+)"
 ```
 
 ### Step 8b: CI probe (background)
