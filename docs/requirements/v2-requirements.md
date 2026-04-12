@@ -419,7 +419,7 @@ The following tools constitute the full MCP surface. This is the product interfa
 
 ## Epic 5: Project & Identity Scoping [Priority: High]
 
-Safe multi-tenant use across machines. Users are identified per request; projects are configured out-of-band. Authentication is deferred to Wave 2, but the identity and project model is established here.
+Safe multi-tenant use across machines. Users are authenticated per request via shared bearer tokens; projects are registered in a database table. OIDC and mTLS are deferred to Wave 2, but the identity, auth, and project model are established here.
 
 ### Story 5.1: User ID resolution
 
@@ -429,12 +429,12 @@ Safe multi-tenant use across machines. Users are identified per request; project
 
 **Acceptance Criteria:**
 
-- Given an incoming MCP request with a resolvable user identity (e.g., via a header or token), when the request is processed, then a `user_id` is associated with the request context.
+- Given an incoming MCP request with an `Authorization: Bearer <token>` header, when the token matches an entry in the configured token-to-user map, then the corresponding `user_id` is associated with the request context.
 - Given a memory is saved, when the record is persisted, then the `user_id` from the request context is stored on the memory record.
-- Given an incoming request without a resolvable user identity, when the request is processed, then the request is rejected with a structured error indicating that a user identity is required.
+- Given an incoming request without a bearer token, or with an unknown token, when the request is processed, then the request is rejected with a structured error indicating that authentication failed.
 - Given the `user_id` is stored on a memory, when the memory is retrieved via `memory_get`, then the `user_id` is included in the returned record.
 
-**Notes:** In Wave 1 (trusted network), user ID resolution may be as simple as a required header (e.g., `X-User-ID`). Full authentication (bearer tokens, OIDC, mTLS) is deferred to Wave 2 (see Story 5.6).
+**Notes:** V2 uses shared bearer tokens per user (ADR-0007). The token-to-user mapping is loaded from a file referenced by `RECALL_AUTH_FILE` (JSON: `{"<token>": {"user_id": "<id>"}}`). OIDC and mTLS are deferred to Wave 2.
 
 ---
 
@@ -455,16 +455,19 @@ Safe multi-tenant use across machines. Users are identified per request; project
 ### Story 5.3: Project configuration
 
 **As an** operator,
-**I want to** configure projects out-of-band (config file or database table),
+**I want to** register projects in a database table,
 **so that** agents can reference a known project ID and the system can validate it.
 
 **Acceptance Criteria:**
 
-- Given a project is configured in the system, when an agent passes that project ID on an MCP call, then the call succeeds.
-- Given a project ID that is not configured, when an agent passes it on an MCP call that requires a project, then the call is rejected with a structured error indicating the unknown project.
-- Given the project configuration, when an operator inspects it, then each project has at minimum an ID and a display name.
+- Given a project is registered in the `projects` table, when an agent passes that project ID on an MCP call, then the call succeeds.
+- Given a project ID that is not registered, when an agent passes it on an MCP call that requires a project, then the call is rejected with a structured error indicating the unknown project.
+- Given the project configuration, when an operator inspects it, then each project has at minimum an ID, a display name, `created_at`, and `created_by`.
+- Given the `recall projects add` CLI command, when an operator runs it with an ID and display name, then the project is registered in the database.
+- Given the `recall projects list` CLI command, when an operator runs it, then all registered projects are listed.
+- Given the `recall projects remove` CLI command, when an operator runs it for a project with no stored memories, then the project is removed.
 
-**Notes:** Initial implementation may accept any project ID string without pre-registration (implicit project creation). Strict project validation can be a follow-up if needed. The design should support either approach.
+**Notes:** Projects are sourced from a `projects` table in Postgres (ADR-0009). There is no config-file fallback. The Project Registry component caches the table and refreshes on a cache miss before rejecting, so a freshly-added project is usable without restart.
 
 ---
 
@@ -496,18 +499,21 @@ Safe multi-tenant use across machines. Users are identified per request; project
 
 ---
 
-### Story 5.6: Authentication (deferred to Wave 2)
+### Story 5.6: Bearer token authentication
 
 **As an** operator,
-**I want to** configure authentication for the Recall server,
+**I want to** configure bearer token authentication for the Recall server,
 **so that** only authorised users can access the memory store.
 
 **Acceptance Criteria:**
 
-- This story is deferred to Wave 2. V2 assumes a trusted network.
-- Given this deferral, when the system is deployed in V2, then user ID resolution (Story 5.1) operates without cryptographic authentication.
+- Given a `RECALL_AUTH_FILE` environment variable pointing to a JSON file, when the server starts, then it loads the token-to-user mapping from that file.
+- Given the auth file contains `{"tok_abc": {"user_id": "alice"}}`, when a request arrives with `Authorization: Bearer tok_abc`, then the request proceeds with `user_id=alice`.
+- Given a request without an `Authorization` header, when processed, then the request is rejected with a structured `{error: "unauthenticated", hint}` error.
+- Given a request with an unknown token, when processed, then the request is rejected with the same structured error.
+- Given the auth file is updated and the server is restarted, then the new token map takes effect.
 
-**Notes:** Authentication options under consideration: shared bearer tokens per user (simplest), OIDC (cleaner but heavier), or mTLS. Decision to be made before Wave 2 implementation.
+**Notes:** Shared bearer tokens per user (ADR-0007). OIDC and mTLS are deferred to Wave 2. Token leakage is total compromise for the affected user — tokens go in a config file with restricted permissions, never in source. The auth file can alternatively be provided as a JSON-encoded env var for single-user dev setups.
 
 ---
 
@@ -569,10 +575,12 @@ Makes Recall runnable as shared team infrastructure. A single container, environ
 **Acceptance Criteria:**
 
 - Given `DATABASE_URL` set to a valid Postgres connection string, when the server starts, then it connects to that database.
-- Given `OPENAI_API_KEY` set to a valid API key, when the server generates embeddings, then it authenticates with that key.
-- Given an optional `OPENAI_BASE_URL` variable, when set, then embedding requests are sent to that base URL (supporting OpenAI-compatible endpoints).
+- Given `EMBEDDINGS_PROVIDER` set to `openai`, when the server generates embeddings, then it calls the OpenAI-compatible HTTP endpoint using `EMBEDDINGS_API_KEY`, `EMBEDDINGS_BASE_URL`, and `EMBEDDINGS_MODEL`.
+- Given `EMBEDDINGS_PROVIDER` set to `sentence-transformers`, when the server generates embeddings, then it runs the model in-process using `EMBEDDINGS_MODEL` (no API key or network call required).
+- Given `RECALL_AUTH_FILE` pointing to a JSON file, when the server starts, then it loads the bearer token-to-user mapping from that file.
 - Given an optional `RECALL_HOST` and `RECALL_PORT` variable, when set, then the server binds to that host and port. When unset, sensible defaults are used.
 - Given a required environment variable is missing, when the server starts, then it exits immediately with an error listing all missing required variables.
+- Given `EMBEDDINGS_DIM` is configured, when the server starts, then it validates the configured dimension matches the existing `vector(N)` column (if any) and fails fast on mismatch.
 
 ---
 
@@ -644,7 +652,7 @@ The last mile. Recall is useless if agents don't know when to store and retrieve
 
 ### Security
 
-- Authentication and access control are deferred to Wave 2 (see Story 5.6). V2 assumes a trusted network.
+- Authentication uses shared bearer tokens per user (ADR-0007, Story 5.6). OIDC and mTLS are deferred to Wave 2.
 - No memory content is logged at INFO level or above.
 
 ### Data integrity
@@ -689,7 +697,7 @@ The last mile. Recall is useless if agents don't know when to store and retrieve
 
 | # | Question | Status | Notes |
 |---|----------|--------|-------|
-| 1 | **Auth mechanism (Story 5.6):** shared bearer tokens per user, OIDC, or mTLS? | Open | Shared bearer tokens are simplest for a small team. Decision needed before Wave 2. |
+| 1 | **Auth mechanism (Story 5.6):** shared bearer tokens per user, OIDC, or mTLS? | Resolved | Shared bearer tokens for v2 (ADR-0007). OIDC/mTLS deferred to Wave 2. |
 | 2 | **Cross-project search:** strictly off, or opt-in via `project_ids: [...]`? | Open | Currently off. Opt-in could be added as a filter parameter on `memory_search`. |
 | 3 | **LLM-driven instruction compaction:** in v2 or v2.1? | Resolved | Deferred to v2.1 (Story 3.5). |
 | 4 | **`kind` vocabulary:** is `decision / episode / component / gotcha / pattern / instruction` the right starting set? | Open | Free-form with documented vocabulary. Team can adjust without server changes. |
@@ -707,7 +715,7 @@ Features deferred from V2 core but planned for the next iteration. Included here
 | # | Feature | Summary |
 |---|---------|---------|
 | W2.1 | List memories with filtering | Filter and browse memories by scope, category, date range |
-| W2.2 | Authentication & access control | Bearer tokens, OIDC, or mTLS — mechanism TBD (see Open Question 1 / Story 5.6) |
+| W2.2 | OIDC / mTLS authentication | Upgrade from shared bearer tokens (v2) to OIDC or mTLS. Bearer tokens ship in v2 (ADR-0007). |
 | W2.3 | Memory provenance | Metadata about who stored a memory and when, for auditability |
 | W2.4 | Instruction compaction | LLM-driven merge/dedup of instruction memories (Story 3.5) |
 | W2.5 | GC reclassification | LLM-driven demotion of global memories to project-specific |
