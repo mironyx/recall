@@ -18,14 +18,14 @@ This means: after making fixes in a CLI session, the diagnostics file may be **s
 
 1. **Identify target files.**
    - If arguments are provided (`$ARGUMENTS`), check only those files.
-   - Otherwise, check **all** files that have a diagnostics export: list every `.json` file under `.diagnostics/` (these are the files the extension has analysed). Also run `git diff --name-only` and `git diff --cached --name-only` to find modified files (`.ts`, `.tsx`, `.js`, `.jsx`) under **both `src/` and `tests/`** that may not have a diagnostics file yet. Union both sets. Test files are analysed by CodeScene and must be included — do not restrict to `src/` only.
+   - Otherwise, check **all** files that have a diagnostics export: list every `.json` file under `.diagnostics/` (these are the files the extension has analysed). Also run `git diff --name-only` and `git diff --cached --name-only` to find modified `.py` files under **both `src/` and `tests/`** that may not have a diagnostics file yet. Union both sets. Test files are analysed too and must be included — do not restrict to `src/` only.
 
 2. **Open all target files in the editor immediately.**
 
-   Do this **before reading diagnostics or making any fixes**. Once a file is open, the editor detects every subsequent on-disk save and triggers a fresh CodeScene pass automatically — so diagnostics will be live as you edit.
+   Do this **before reading diagnostics or making any fixes**. Once a file is open, the editor detects every subsequent on-disk save and triggers a fresh analysis pass automatically — so diagnostics will be live as you edit.
 
    ```bash
-   .claude/hooks/open-in-editor.sh src/app/api/fcs/service.ts src/lib/github/client.ts
+   .claude/hooks/open-in-editor.sh src/recall/services/memory.py src/recall/store/namespace.py
    sleep 5
    ```
 
@@ -61,16 +61,16 @@ This means: after making fixes in a CLI session, the diagnostics file may be **s
 
 ```json
 {
-  "file": "relative/path/to/source.ts",
-  "analyzedAt": "2026-03-12T11:53:41.861Z",
+  "file": "relative/path/to/source.py",
+  "analyzedAt": "2026-04-11T11:53:41.861Z",
   "diagnostics": [
     {
-      "source": "ts",
+      "source": "mypy",
       "severity": "Error",
       "message": "Description of the issue",
       "line": 42,
       "column": 5,
-      "code": 1214
+      "code": "assignment"
     }
   ]
 }
@@ -84,14 +84,14 @@ This means: after making fixes in a CLI session, the diagnostics file may be **s
 **Files checked:** 3 | **With issues:** 1 | **Clean:** 1 | **No diagnostics:** 1
 
 ### Errors
-- `src/lib/engine/scoring.ts:42:5` [ts/2304] — Cannot find name 'foo'
+- `src/recall/services/memory.py:42:5` [mypy/assignment] — Incompatible types in assignment
 
 ### Warnings
-- `src/lib/engine/scoring.ts:15:1` [codescene/brain-method] — Complex method detected
+- `src/recall/services/memory.py:15:1` [ruff/C901] — Function is too complex
 
 ### Clean
-- `src/lib/engine/types.ts` — No issues
+- `src/recall/store/types.py` — No issues
 
 ### No diagnostics available
-- `tests/helpers/auth.test.ts` — Extension has not exported diagnostics for this file
+- `tests/unit/test_memory.py` — Extension has not exported diagnostics for this file
 ```

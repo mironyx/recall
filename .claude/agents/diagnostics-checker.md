@@ -23,8 +23,8 @@ files under `.diagnostics/`, mirroring the source tree structure.
 ## Input
 
 You will receive a list of source files that were recently changed. For example:
-- `src/lib/engine/scoring.ts`
-- `tests/helpers/supabase.integration.test.ts`
+- `src/recall/services/memory.py`
+- `tests/integration/test_store.py`
 
 ## How to Check
 
@@ -41,8 +41,8 @@ sleep 3
 
 For each changed source file, the diagnostics file is at `.diagnostics/<path>.json`.
 For example:
-- `src/lib/engine/scoring.ts` -> `.diagnostics/src/lib/engine/scoring.ts.json`
-- `tests/helpers/foo.test.ts` -> `.diagnostics/tests/helpers/foo.test.ts.json`
+- `src/recall/services/memory.py` -> `.diagnostics/src/recall/services/memory.py.json`
+- `tests/unit/test_memory.py` -> `.diagnostics/tests/unit/test_memory.py.json`
 
 Use Glob to find matching files: `.diagnostics/**/<filename>.json`
 
@@ -55,23 +55,23 @@ Each diagnostics file is JSON with this structure:
 
 ```json
 {
-  "file": "relative/path/to/source.ts",
-  "analyzedAt": "2026-03-12T11:53:41.861Z",
+  "file": "relative/path/to/source.py",
+  "analyzedAt": "2026-04-11T11:53:41.861Z",
   "diagnostics": [
     {
-      "source": "ts",
+      "source": "mypy",
       "severity": "Error",
       "message": "Description of the issue",
       "line": 42,
       "column": 5,
-      "code": 1214
+      "code": "assignment"
     }
   ]
 }
 ```
 
 Fields:
-- `source` — the extension that produced the diagnostic (e.g., `ts`, `codescene`)
+- `source` — the extension that produced the diagnostic (e.g., `mypy`, `ruff`, `pyright`)
 - `severity` — `Error`, `Warning`, `Information`, or `Hint`
 - `message` — human-readable description
 - `line` / `column` — location in the source file
@@ -88,16 +88,16 @@ Return a concise summary in this format:
 **Issues found:** N
 
 ### Errors
-- `file.ts:42:5` [source/code] — Message
+- `file.py:42:5` [source/code] — Message
 
 ### Warnings
-- `file.ts:15:1` [source/code] — Message
+- `file.py:15:1` [source/code] — Message
 
 ### Info
-- `file.ts:8:3` [source/code] — Message
+- `file.py:8:3` [source/code] — Message
 
 ### No diagnostics available
-- `file.ts` — No diagnostics file found (extension may still be processing)
+- `file.py` — No diagnostics file found (extension may still be processing)
 ```
 
 ## Important Principles

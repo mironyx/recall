@@ -49,8 +49,7 @@ Build a mental map of:
 Scan `src/` for implementation artefacts:
 - Read key source files (types, schemas, clients, routes) to understand what has been implemented
 - Compare implemented types, enum values, field names, and function signatures against the design contracts in `docs/design/`
-- Check that database column names, constraint values, and API contracts in source code match the L4 design specifications
-- Check that database migrations in `supabase/migrations/` align with the design schema
+- Check that database column names, constraint values, and API contracts in source code match the L4 design specifications, including any schema migrations
 - Flag any implementation-vs-design misalignment (e.g., different enum values, renamed fields, missing fields, stale model strings)
 
 This step is essential — implementation drift is harder to detect than document drift and causes runtime failures.

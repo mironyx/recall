@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A small, focused MCP server that gives coding agents persistent memory across sessions, machines, and projects. Successor to LangMem v1, deliberately rebuilt to be smaller, simpler, and agent-first.
 
+**Current phase:** Phase 0 — Foundation (scaffolding, CI, container, real-Postgres test fixture). See [docs/plans/2026-04-10-v1-implementation-plan.md](docs/plans/2026-04-10-v1-implementation-plan.md) for the full phasing and [docs/design/v1-design.md](docs/design/v1-design.md) for the HLD.
+
 **The full product spec lives in [docs/requirements/v2-requirements.md](docs/requirements/v2-requirements.md). Read it before starting any non-trivial change.**
 
 ## Tech stack
@@ -91,7 +93,20 @@ Upstream docs and source for the two libraries we build on are distilled locally
 - [docs/reference/langmem-notes.md](docs/reference/langmem-notes.md) — LangMem tools, namespace templating, store wiring.
 - [docs/reference/asyncpostgresstore-notes.md](docs/reference/asyncpostgresstore-notes.md) — schema DDL, API signatures, filter operators, the two gotchas (top-level-only keys, lexicographic numeric comparison), TTL, migrations.
 
-Key architectural decisions live in [docs/adr/](docs/adr/) — 0001 (flat value schema), 0002 (namespace shape), 0003 (no TTL in v1), 0004 (filter limitations & ISO-string dates).
+Key architectural decisions live in [docs/adr/](docs/adr/) — 0001 (flat value schema), 0002 (namespace shape), 0003 (no TTL in v1), 0004 (filter limitations & ISO-string dates), 0005 (project bootstrap pipeline), 0006 (Streamable HTTP sole transport), 0007 (shared bearer-token auth, OIDC/mTLS deferred), 0008 (embeddings provider abstraction), 0009 (project registry table), 0010 (search ranking: union with project boost), 0011 (observability: structlog + OTEL auto-instrumentation only), 0012 (test strategy: real Postgres via testcontainers, no mocks), 0013 (in-app DDL migrations, no Alembic).
+
+## Engineering Process
+
+Pipeline: `requirements → /kickoff → /architect → /feature → /feature-end → /retro`.
+For the full lifecycle, stages, human gates, artefact map, skills index, and ADR index, see [docs/process/engineering-process.md](docs/process/engineering-process.md). Rationale for the bootstrap shape lives in [ADR-0005](docs/adr/0005-project-bootstrap-pipeline.md).
+
+### Custom skills
+
+- `/kickoff` — Bootstrap a new project (or major version) from `REQUIREMENTS.md`. Produces the HLD (Levels 1–3), load-bearing ADRs, and the implementation plan, with human gates after each. Use once per project/version before `/architect`. See [ADR-0005](docs/adr/0005-project-bootstrap-pipeline.md).
+- `/architect` — Read a plan and produce all design artefacts in one pass (ADRs, LLDs, design doc updates, enriched issue bodies). Stops for human review before implementation.
+- `/feature` — Autonomous implementation cycle: picks top Todo item (or specified issue), creates branch, TDD implementation, `/diag`, commit, PR, `/pr-review-v2`. Stops after review for human approval.
+- `/feature-end` — Post-review wrap-up: writes session log, commits remaining changes, merges PR (with approval), switches to parent branch, cleans up local branch, updates project board.
+- `/drift-scan`, `/retro` — Periodic maintenance sweeps across requirements, design and code.
 
 ## Custom Skills
 

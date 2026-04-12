@@ -68,60 +68,8 @@ session log.
    - Decisions made during the session
    - Any review feedback addressed
    - Next steps or follow-up items
-   - Final feature cost (from Step 2.5) — include both the PR-creation cost (from PR body) and the final total, so the delta is visible
 3. If a draft file was used, delete it: `rm docs/sessions/*-draft.md`.
 4. Stage the session log (and the draft deletion if applicable).
-
-### Step 2.5: Query final feature cost
-
-Query Prometheus for the full feature total (all sessions since `/feature` started — same
-session IDs registered in the textfile). This is the **final** cost snapshot; comparing it
-to the cost recorded in the PR body at creation time shows how much effort was spent
-post-PR (review fixes, re-runs, etc.). Applies `ai-cost-final:*`, `input-tokens-final:*`, and `output-tokens-final:*` labels to the issue and PR (complementing the `*-pr` labels written at PR creation).
-
-Derive the issue number from the git log and run the shared script:
-
-```bash
-ISSUE=$(git log --oneline -10 | grep -o '#[0-9]*' | head -1 | tr -d '#')
-PR=$(gh pr view --json number --jq .number 2>/dev/null || echo "")
-COST_OUTPUT=$(.claude/hooks/run-python.sh scripts/query-feature-cost.py FCS-$ISSUE --issue $ISSUE ${PR:+--pr $PR} --stage final)
-echo "$COST_OUTPUT"
-```
-
-Post the output as a PR comment:
-
-```bash
-gh pr comment <number> --body "$COST_OUTPUT"
-```
-
-Store the cost figures — you will include them in the session log in Step 2.
-
-### Step 2.6: Cost retrospective
-
-Analyse the full cost and write a brief retrospective to include in the session log.
-This is the institutional memory that makes future features cheaper.
-
-1. **Cost summary:** PR-creation cost (from PR body `Usage` section) vs final total.
-   Delta = post-PR work (review fixes, re-runs, extra commits).
-
-2. **Identify cost drivers.** Check each of these against the git log and session history:
-
-   | Driver | How to detect | Typical impact |
-   |--------|--------------|----------------|
-   | Context compaction | Session summary starts "This session is being continued..." | High — re-summarising inflates cache-write tokens |
-   | Fix cycles (RED→fix rounds) | Count commits before the first green run | Medium — each vitest run adds tokens |
-   | Agent spawns | Count Agent calls in the session: simplify (3), pr-review (3), diagnostics, ci-probe | Medium — each spawn re-sends the full diff |
-   | LLD quality gaps | pr-review found design-contract violations → extra fix commit | Medium — avoidable with better LLD signatures upfront |
-   | Mock complexity | Many test fix rounds before mocks worked | Low–medium |
-   | Zod/framework version gotchas | Fix cycles on schema/type issues | Low |
-
-3. **Improvement actions:** For each driver, record a concrete change for next time:
-   - "LLD private-helper signatures were wrong → validate signatures in a quick `tsc` pass before writing tests"
-   - "Context compaction hit → keep PRs under 200 lines; break large features into two issues"
-   - "3 simplify agents re-read the full diff → run simplify before pr-review, not both"
-   - "Zod v4 UUID format → read migration notes at session start for framework upgrades"
-
-Record under **## Cost retrospective** in the session log.
 
 ### Step 3: Commit remaining changes
 
@@ -228,12 +176,11 @@ gh api repos/{owner}/{repo}/branches/main/protection --silent 2>&1 | head -1
   >   "required_status_checks": {
   >     "strict": true,
   >     "contexts": [
-  >       "Lint & Type-check",
+  >       "Lint (ruff)",
+  >       "Type-check (mypy)",
   >       "Unit tests",
-  >       "Integration tests (Supabase)",
-  >       "Build",
-  >       "Docker build",
-  >       "E2E tests (Playwright)"
+  >       "Integration tests (Postgres + pgvector)",
+  >       "Docker build"
   >     ]
   >   },
   >   "enforce_admins": false,
@@ -242,6 +189,8 @@ gh api repos/{owner}/{repo}/branches/main/protection --silent 2>&1 | head -1
   > }
   > EOF
   > ```
+  > Adjust the context names to match the job names in `.github/workflows/ci.yml`
+  > once CI is wired up.
 
 ## Blocker policy
 

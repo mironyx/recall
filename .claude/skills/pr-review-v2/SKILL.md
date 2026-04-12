@@ -34,7 +34,8 @@ Run ALL of the following in parallel:
 2. **PR mode:** `gh pr diff --name-only <number>`.
    **Local mode:** `git diff --name-only HEAD`.
 3. Read `CLAUDE.md` (root).
-4. Read `package.json` — capture exact versions of direct dependencies.
+4. Read `pyproject.toml` — capture exact versions of direct dependencies under
+   `[project].dependencies` and `[project.optional-dependencies]`.
 
 If diff is empty, print "Nothing to review — diff is empty." and stop.
 
@@ -43,14 +44,16 @@ If diff is empty, print "Nothing to review — diff is empty." and stop.
 From the gathered data, compute:
 
 - `DIFF_LINE_COUNT` — total lines in the diff (added + removed)
-- `CHANGED_FILES` — `.ts`, `.tsx`, `.js`, `.jsx` files added or modified (not deleted)
+- `CHANGED_FILES` — `.py` files added or modified (not deleted)
 - `FRAMEWORK_DEPS` — top 5 packages imported in changed files that appear in
-  `package.json` dependencies (not devDependencies)
+  `pyproject.toml`'s runtime dependencies (not dev / optional-dev extras)
 - `PATTERNS_NEEDED` — true if ANY of these appear in the changed file list:
-  - `package.json`, `package-lock.json`
+  - `pyproject.toml`, `uv.lock`
   - `.env`, `.env.*`
-  - Any file importing a framework package (supabase, next, react, prisma, etc.)
-  - Any config file (`*.config.ts`, `middleware.ts`, `next.config.*`)
+  - Any file importing a framework package (`langgraph`, `langmem`, `mcp`,
+    `asyncpg`, `pgvector`, `structlog`, `opentelemetry`, `openai`, etc.)
+  - Any config file (`ruff.toml`, `mypy.ini`, `pytest.ini`, `alembic.ini`,
+    `src/recall/config*.py`)
 
 Then fetch in parallel:
 - **Issue body:** extract linked issue from PR body (`Closes #N`, `Fixes #N`, `Resolves #N`).
@@ -74,11 +77,12 @@ in one pass: bugs, code justification, design principles, CLAUDE.md compliance, 
 anti-patterns, and design conformance.
 
 ## Part 1: Bugs (block if found)
-- Logic errors, off-by-one, null dereferences, incorrect error handling
-- Missing awaits on async calls
+- Logic errors, off-by-one, None dereferences, incorrect error handling
+- Missing awaits on async coroutines (async function called without `await`)
 - Race conditions or incorrect state transitions
-- Security issues (injection, credential exposure, missing auth checks)
-- Silent catch blocks that discard errors without at least a console.error — always a bug
+- Security issues (SQL injection, credential exposure, missing auth checks)
+- Silent `except` blocks that discard errors without at least a structured
+  `logger.exception(...)` or re-raise — always a bug
 
 ## Part 2: Code justification (block if severe)
 - Does this code solve the stated problem without over-engineering?
@@ -87,34 +91,42 @@ anti-patterns, and design conformance.
 - Complexity that could be replaced by simpler alternatives?
 
 ## Part 3: Design principles (block if severe)
-This project uses Clean Architecture and SOLID:
-- Clean Architecture: `src/lib/engine/` must have no imports from Next.js, Supabase, or
-  external frameworks. Dependencies must point inward only.
+This project uses a layered architecture with clear boundaries:
+- **Core rule:** `src/recall/services/` (business logic) must have no imports
+  from framework specifics beyond the injected context — no `mcp.*` types,
+  no direct `asyncpg` usage, no OpenAI SDK imports. Dependencies must point
+  inward (services depend on the store and embedding **interfaces**, not
+  concrete implementations).
 - Single Responsibility: does each new function/module do one thing?
-- Dependency Inversion: dependencies injected, not imported as concrete implementations.
-- Interface Segregation: no overly broad interfaces forced on callers.
+- Dependency Inversion: stores, embedders, and MCP context are injected into
+  services, not imported as concrete implementations.
+- Interface Segregation: no overly broad protocols forced on callers.
 - Open/Closed: a change should not require modifying multiple unrelated modules.
 - Functions over classes unless state genuinely requires a class.
+- Respect the storage namespace invariant from REQUIREMENTS.md S3.7:
+  `(scope, project_id)` and nothing else.
 
 ## Part 4: CLAUDE.md compliance
 Only check these:
-- No `any` type in TypeScript (block)
-- No `Co-Authored-By` trailers in commit messages (block)
-- Every commit uses conventional format (`feat:`, `fix:`, etc.) AND references an issue (warn)
+- `typing.Any` or `# type: ignore` without a one-line justification comment (warn)
+- Mocking `AsyncPostgresStore` in any test under `tests/integration/` (block) —
+  see CLAUDE.md "Things to never do"
+- Every commit uses conventional format (`feat:`, `fix:`, etc.) AND references an
+  issue (warn)
 
 ## Part 5: Design conformance (if design references exist)
-For each changed `.ts` or `.tsx` file, look for a header comment:
-  // Design reference: <path> §<section>
+For each changed `.py` file, look for a module-level comment near the top:
+  # Design reference: <path> §<section>
 
 If found:
 1. Read the referenced doc section.
-2. Extract every function name specified in that section.
+2. Extract every function / class name specified in that section.
 3. For each function in the diff NOT in the designed list:
-   - No justification comment → **block** (add `// Justification:` or update LLD)
+   - No justification comment → **block** (add `# Justification:` or update LLD)
    - Justification comment exists → **warn**
 4. Exported/public unspecified functions are always **block** regardless of justification.
 
-Also scan for silent catch blocks (error not passed to any logger) → **block**.
+Also scan for silent `except` blocks (error not passed to any logger) → **block**.
 
 ## Part 6: Known framework anti-patterns (always check, no web search)
 Read `.claude/skills/shared/anti-patterns.md` and apply all checks from that file.
@@ -155,7 +167,7 @@ JSON array. Each element:
 {
   "type": "bug" | "justification" | "design-principle" | "compliance" | "unspecified-function" | "silent-swallow" | "anti-pattern",
   "severity": "block" | "warn",
-  "file": "relative/path.ts",
+  "file": "relative/path.py",
   "line": 42,
   "finding": "one sentence",
   "evidence": "quoted code or rule"
@@ -180,11 +192,12 @@ design principles, CLAUDE.md compliance, and known framework anti-patterns.
 Design conformance (LLD matching) is handled by a separate agent.
 
 ## Bugs (block)
-- Logic errors, off-by-one, null dereferences, incorrect error handling
-- Missing awaits on async calls
+- Logic errors, off-by-one, None dereferences, incorrect error handling
+- Missing awaits on async coroutines (async function called without `await`)
 - Race conditions or incorrect state transitions
-- Security issues (injection, credential exposure, missing auth checks)
-- Silent catch blocks that discard errors without at least a console.error — always a bug
+- Security issues (SQL injection, credential exposure, missing auth checks)
+- Silent `except` blocks that discard errors without at least a structured
+  `logger.exception(...)` or re-raise — always a bug
 
 ## Code justification (block if severe)
 - Does this code solve the stated problem without over-engineering?
@@ -193,19 +206,24 @@ Design conformance (LLD matching) is handled by a separate agent.
 - Complexity replaceable by simpler alternatives?
 
 ## Design principles (block if severe)
-This project uses Clean Architecture and SOLID:
-- Clean Architecture: `src/lib/engine/` must have no imports from Next.js, Supabase, or
-  external frameworks. Dependencies must point inward only.
+This project uses a layered architecture with clear boundaries:
+- **Core rule:** `src/recall/services/` (business logic) must have no imports
+  from framework specifics beyond the injected context — no `mcp.*` types,
+  no direct `asyncpg` usage, no OpenAI SDK imports. Services depend on the
+  store and embedding **interfaces**, not concrete implementations.
 - Single Responsibility: does each new function/module do one thing?
-- Dependency Inversion: dependencies injected, not imported as concrete implementations.
-- Interface Segregation: no overly broad interfaces forced on callers.
+- Dependency Inversion: stores, embedders, and MCP context are injected into
+  services, not imported as concrete implementations.
+- Interface Segregation: no overly broad protocols forced on callers.
 - Open/Closed: a change should not require modifying multiple unrelated modules.
 - Functions over classes unless state genuinely requires a class.
+- Respect the storage namespace invariant from REQUIREMENTS.md S3.7:
+  `(scope, project_id)` and nothing else.
 
 ## CLAUDE.md compliance
 Only check these:
-- No `any` type in TypeScript (block)
-- No `Co-Authored-By` trailers in commit messages (block)
+- `typing.Any` or `# type: ignore` without a one-line justification comment (warn)
+- Mocking `AsyncPostgresStore` in any test under `tests/integration/` (block)
 - Every commit uses conventional format AND references an issue (warn)
 
 ## Known framework anti-patterns (always check, no web search)
@@ -247,7 +265,7 @@ JSON array. Each element:
 {
   "type": "bug" | "justification" | "design-principle" | "compliance" | "anti-pattern",
   "severity": "block" | "warn",
-  "file": "relative/path.ts",
+  "file": "relative/path.py",
   "line": 42,
   "finding": "one sentence",
   "evidence": "quoted code or rule"
@@ -268,8 +286,8 @@ for silent error swallowing and diagnostics issues.
 
 ## Step 1: Identify design references
 
-For each changed source file (`.ts`, `.tsx`), look for a header comment:
-  // Design reference: <path> §<section>
+For each changed `.py` source file, look for a module-level comment near the top:
+  # Design reference: <path> §<section>
 
 If no such comment exists on a file, skip design-conformance checks for that file but still
 run the silent-swallow and diagnostics checks.
@@ -284,7 +302,7 @@ For each design reference found:
 
 **If the LLD has an internal decomposition section:**
 - Functions in IMPLEMENTED_FUNCTIONS not in DESIGNED_FUNCTIONS:
-  - No justification comment → **block** (add `// Justification:` or update LLD)
+  - No justification comment → **block** (add `# Justification:` or update LLD)
   - Justification comment exists → **warn**
 
 **If the LLD has NO internal decomposition section:**
@@ -295,10 +313,12 @@ Note: the LLD is not infallible. Surface the gap — the resolution is a human d
 
 Exported/public functions are higher risk than private helpers — note this in findings.
 
-## Step 3: Silent catch/swallow check
+## Step 3: Silent except/swallow check
 
-Scan the diff for `catch` blocks where the error is not passed to at least a
-`console.error` / `logger.error` / `log.error` call.
+Scan the diff for `except` blocks where the exception is not passed to at least a
+`logger.exception` / `logger.error` / structured log call, and not re-raised.
+Bare `except:` and `except Exception:` that end in `pass` or a silent return are
+always findings.
 
 For each match: **block** finding. Fallback behaviour does not excuse missing observability.
 
@@ -328,7 +348,7 @@ JSON array. Each element:
 {
   "type": "unspecified-function" | "silent-swallow" | "diagnostic",
   "severity": "block" | "warn",
-  "file": "relative/path.ts",
+  "file": "relative/path.py",
   "line": 42,
   "finding": "one sentence",
   "evidence": "function name, quoted code, or diagnostic text"
@@ -383,10 +403,19 @@ Cross-reference findings with the diff. Only report if the diff actively uses a 
 or insecure pattern. Do not report theoretical risks not present in the code.
 
 Examples of the kind of findings to look for (not exhaustive):
-- Supabase: anon key in server context, missing RLS, `.from()` without `.select()`
-- Next.js: mixing App Router and Pages Router patterns, wrong data fetching strategy
-- Prisma: N+1 query patterns, missing transactions on multi-step writes
-- Any auth library: insecure token storage, missing CSRF protection
+- `langgraph` / `AsyncPostgresStore`: nested-key filters in `asearch`
+  (filters match top-level keys only), numeric comparison on store values
+  (lexicographic only — dates must be ISO strings), widening the namespace
+  beyond `(scope, project_id)`
+- `asyncpg`: blocking calls inside `async def`, missing connection pool
+  lifecycle management, SQL built via string formatting instead of
+  parameter binding
+- `mcp` SDK: hand-rolling transport or session handling instead of using
+  the library primitives, returning non-JSON-serialisable tool results
+- `openai` / embeddings: synchronous client inside async code, missing
+  timeout + single retry (REQUIREMENTS.md S6.5)
+- `opentelemetry` / `structlog`: hand-rolled spans where auto-instrumentation
+  already covers the path (ADR-0011 says auto-instrumentation only in v1)
 
 Packages to check:
 {{FRAMEWORK_DEPS_WITH_VERSIONS}}
@@ -411,7 +440,7 @@ JSON array. Each element:
 {
   "type": "design-contract" | "anti-pattern",
   "severity": "block" | "warn",
-  "file": "relative/path.ts",
+  "file": "relative/path.py",
   "line": 42,
   "finding": "one sentence — include WHY this pattern is discouraged",
   "evidence": "quoted code from diff",
@@ -445,13 +474,13 @@ framework anti-patterns, design conformance.
 
 #### Blockers (N)
 
-**[type] file.ts:line**
+**[type] file.py:line**
 <finding>
 > <evidence>
 
 #### Warnings (N)
 
-**[type] file.ts:line**
+**[type] file.py:line**
 <finding>
 > <evidence>
 ```
@@ -464,27 +493,6 @@ Types: `[bug]`, `[justification]`, `[design-principle]`, `[compliance]`, `[desig
 gh pr comment <number> --body "<formatted report>"
 ```
 
-### Step 5: Cost
-
-After outputting the review (and posting the PR comment if in PR mode), run the cost script
-for the current session and append the result to the terminal output. Do NOT apply labels —
-reporting only.
-
-```bash
-.claude/hooks/run-python.sh scripts/query-feature-cost.py "$(.claude/hooks/run-python.sh scripts/get-session-id.py)"
-```
-
-If the script returns "Prometheus unreachable" or "No session data found", print the message
-as-is — do not retry or error. Cost reporting is best-effort.
-
-Append to terminal output (not to the PR comment):
-
-```
----
-### Review cost (pr-review-v2 — adaptive)
-<script output>
-```
-
 ---
 
 ## Notes
@@ -495,13 +503,11 @@ Append to terminal output (not to the PR comment):
 - If the diff is empty, report "Nothing to review — diff is empty." and stop.
 - The 150-line threshold is a guide. If a large diff is mostly trivial changes (whitespace,
   renames, generated code), use judgment and prefer the single-agent path.
-- The static anti-pattern list runs on EVERY review at no extra cost — no web search, no
-  extra agent. Agent B supplements this with framework-specific research only when framework
-  files changed.
-- The Supabase anon key check is deliberately **block** not warn: it bypasses RLS silently
-  even when RLS policies exist. This is a security issue, not a style preference.
-- Add new static anti-patterns to this SKILL.md as the team discovers them. The static list
-  is the institutional memory of "things we've learned the hard way."
-- Cost is reported in terminal only — never posted to GitHub. The v1 label in the cost
-  output ("pr-review v1 — 3 agents" vs "pr-review-v2 — adaptive") makes it easy to compare
-  runs side by side in the terminal.
+- The static anti-pattern list in `.claude/skills/shared/anti-patterns.md` runs on EVERY
+  review at no extra cost — no web search, no extra agent. Agent B supplements this with
+  framework-specific research only when framework files changed.
+- The "integration test mocks `AsyncPostgresStore`" check is deliberately **block** not
+  warn: the whole point of integration tests is catching schema / migration drift against
+  real Postgres, and a mock defeats that. This is a correctness invariant, not style.
+- Add new static anti-patterns to `.claude/skills/shared/anti-patterns.md` as the team
+  discovers them. That file is the institutional memory of "things we've learned the hard way."

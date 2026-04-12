@@ -1,40 +1,84 @@
-# Known Framework Anti-Patterns (Static Checklist)
+# Known Anti-Patterns (Static Checklist)
 
-Scan the diff for these regardless of which frameworks are imported. A package can be
-current and non-deprecated while specific usage patterns within it are wrong.
-
-Add new anti-patterns to this file as the team discovers them. This list is the
+Scan the diff for these regardless of which files changed. This list is the
 institutional memory of "things we've learned the hard way."
 
-## Supabase
+Add new anti-patterns here as the team discovers them.
 
-- `supabaseAnonKey` or `SUPABASE_ANON_KEY` used in any server-side file (API routes,
-  server actions, middleware, `*.server.ts`, files under `src/lib/engine/`, `src/app/api/`).
-  The anon key is for client-side only. Server-side must use `SUPABASE_SERVICE_ROLE_KEY`.
-  Severity: **block** (security — anon key bypasses RLS on the server even when RLS
-  policies exist).
-- `createClient` called with anon key in a server context → **block** same reason.
-- `.from('table')` without `.select(...)` — returns all columns, exposes schema → **warn**.
-- `createClient` on the server without service role key and no evidence of RLS → **warn**.
-- Multiple `.from()` write calls (upsert/insert/update/delete) in a single function with no
-  transaction wrapping — if any step after the first fails, the DB is left partially written
-  → **warn**. Fix: move multi-step writes into a PostgreSQL function called via `.rpc()` so
-  all writes are atomic. Exception: if writes are genuinely independent (failure of one cannot
-  corrupt the other), note this in the finding.
+## Storage namespace & scoping
 
-## Next.js
+- **Widening the store namespace beyond `(scope, project_id)`** — e.g. prepending
+  `user_id`, appending a sub-key, or using a three-element tuple. The invariant is
+  enforced by REQUIREMENTS.md S3.7 and ADR-0002. Severity: **block**. Fix: keep the
+  namespace exactly `(scope, project_id)` and put any extra dimension in the record's
+  value or metadata.
+- **Writing a `scope=global` row that references project-specific state** (e.g. a
+  repo path, a local file, a PR number tied to one project). See REQUIREMENTS.md S1.8
+  decision rule. Severity: **warn**. Fix: use `scope=project` instead.
+- **Creating a `scope=project` record without a non-null `project_id`**, or a
+  `scope=global` record with a non-null `project_id`. The DB CHECK constraint from
+  S1.7 will reject it at write time, but the bug should be caught in review first.
+  Severity: **block**.
 
-- `cookies()`, `headers()` called outside an async server component or route handler → **block**.
-- `"use client"` directive on a file that imports server-only modules → **block**.
-- `process.env.NEXT_PUBLIC_*` accessed in server-only code (leaks to client bundle) → **warn**.
-- `getServerSideProps` in the App Router (Pages Router pattern, wrong paradigm) → **warn**.
+## Store access
 
-## General secrets / env
+- **Mocking `AsyncPostgresStore` (or any of its methods) in integration tests.** See
+  CLAUDE.md "Things to never do" and ADR-0012. Integration tests must use
+  `testcontainers` against real Postgres. Severity: **block**. Fix: use the
+  real-Postgres fixture; if the test is fundamentally a unit test, move it to
+  `tests/unit/` and test the pure code path without the store.
+- **Raw SQL against the memory tables bypassing `AsyncPostgresStore`** in
+  application code. `asearch`, `aput`, `aget`, `adelete` are the only supported
+  entry points for memory records. Raw SQL is acceptable only in migrations and
+  the bootstrap DDL path (ADR-0013). Severity: **warn**.
+- **Assuming nested-key filters work on `AsyncPostgresStore.asearch`** — the filter
+  API only matches on top-level keys of the stored value. See
+  `docs/reference/asyncpostgresstore-notes.md` and ADR-0004. Severity: **warn**.
+- **Numeric comparison in store filters** — store filters compare values
+  lexicographically, so `{"created_at": {"$gt": 1712000000}}` will not do what you
+  think. Use ISO-8601 strings for dates (ADR-0004). Severity: **warn**.
 
-- Any hardcoded secret, API key, or token string not referencing `process.env` → **block**.
-- `process.env.SOMETHING` used without a null check or fallback in production code → **warn**.
+## MCP tool surface
 
-## TypeScript
+- **Adding a new MCP tool without updating REQUIREMENTS.md E2** and confirming
+  the ≤ 6 tool budget still holds (v1 ships 5). Tool design is prompt design — new
+  tools need a product decision, not just an implementation. Severity: **block**.
+- **Restoring a tool that REQUIREMENTS.md v1 removed** (`instructions_get`,
+  anything tags-related). Instructions are on-demand via `memory_search`; tags
+  were dropped. If you need these back, it is a spec change, not an
+  implementation detail. Severity: **block**.
+- **Adding `ttl`, `expires_at`, or any time-based auto-expiry** to memories. See
+  ADR-0003: v1 has no TTL. Severity: **block**.
 
-- `as unknown as X` double cast — usually hiding a type error → **warn**.
-- Non-null assertion `!` on values that could genuinely be null → **warn**.
+## Secrets & env
+
+- Any hardcoded secret, API key, or bearer token not referencing `os.environ`
+  (or equivalent). Severity: **block**.
+- `os.environ["FOO"]` accessed at module import time without a default or error
+  path — crashes tests and tools that import the module for unrelated reasons.
+  Severity: **warn**. Fix: read env vars lazily inside the function or at startup
+  in `main()`.
+- Printing request/response bodies that may contain user content to stdout
+  without a structured log call. Structured logs go via `structlog` per ADR-0011
+  so fields stay queryable. Severity: **warn**.
+
+## Error handling
+
+- `except:` (bare) or `except Exception:` without re-raise or structured log.
+  Silent swallowing is always a bug — see REQUIREMENTS.md S6.5 and the
+  silent-swallow gate in `/feature-core`. Severity: **block**. Fix: narrow the
+  exception, log with `logger.exception(...)`, and either recover or re-raise.
+- `try` block around an entire function body — almost always too broad. Severity:
+  **warn**.
+
+## Python / typing
+
+- `typing.Any` or `# type: ignore` without a justification comment.
+  `mypy --strict` is the contract; escape hatches need a one-line explanation of
+  the specific constraint that forced them. Severity: **warn**.
+- `cast(...)` used to paper over a type mismatch rather than fix it. Severity:
+  **warn**.
+- Sync IO (`time.sleep`, blocking `requests.get`, blocking `psycopg` calls) inside
+  an `async def`. Blocks the event loop. Severity: **block**. Fix: use the async
+  counterpart (`asyncio.sleep`, `httpx.AsyncClient`, `asyncpg` / the async store
+  method).

@@ -11,22 +11,23 @@
 #
 # Status values: todo | blocked | "in progress" | done (case-insensitive)
 #
-# Cached IDs from: gh project field-list 2 --owner mironyx
+# Cached IDs from: gh project field-list 3 --owner mironyx
 # These are stable and do not change between sessions.
 
 set -euo pipefail
 
-REPO="mironyx/feature-comprehension-score"
+REPO="mironyx/recall"
 OWNER="mironyx"
-PROJECT_NUMBER=2
-PROJECT_ID="PVT_kwDOEEi_vs4BToGD"
-FIELD_ID="PVTSSF_lADOEEi_vs4BToGDzhA10G4"
+REPO_NAME="${REPO#*/}"
+PROJECT_NUMBER=3
+PROJECT_ID="PVT_kwDOEEi_vs4BUJhB"
+FIELD_ID="PVTSSF_lADOEEi_vs4BUJhBzhBTolo"
 
 declare -A STATUS_IDS=(
-  [todo]="8d4368d4"
-  [blocked]="3aacb396"
-  [in progress]="3317982f"
-  [done]="8c0ec0d7"
+  [todo]="e6458929"
+  [blocked]="9b05d20a"
+  [in progress]="29b924a1"
+  [done]="2fb5d953"
 )
 
 # Find a real Python, skipping the Windows Store stub in WindowsApps.
@@ -75,7 +76,7 @@ find_item_id() {
   local issue_number="$1"
   gh api graphql -f query="
     query {
-      repository(owner: \"${OWNER}\", name: \"feature-comprehension-score\") {
+      repository(owner: \"${OWNER}\", name: \"${REPO_NAME}\") {
         issue(number: ${issue_number}) {
           projectItems(first: 10) {
             nodes {

@@ -1,25 +1,25 @@
 ---
 name: create-plan
-description: Create a detailed implementation plan for a feature or task. Use when the user wants to plan work, break down a feature, create an implementation spec, or mentions planning a phase of work.
+description: Create a detailed implementation plan for a feature, phase, or epic, derived from an existing HLD. Use when an HLD already exists and a phase or epic needs planning. Do NOT use for initial project bootstrap — use /kickoff instead, which owns HLD + plan together. See ADR-0005.
 allowed-tools: Read, Write, Bash, Glob, Grep
 ---
 
 # Create Implementation Plan
 
-Produces a plan doc shaped around the **epic/task model** (ADR-0018) so it hands
-off cleanly to `/architect epic <n>`.
+Produces a plan doc shaped around the epic/task model so it hands off
+cleanly to `/architect epic <n>`.
 
 ## Usage
 
 - `/create-plan` — free-form; ask the user what to plan.
-- `/create-plan docs/requirements/req-<name>.md` — plan from a requirements doc.
+- `/create-plan REQUIREMENTS.md` — plan from the root requirements doc (or a specific section heading).
 - `/create-plan docs/adr/NNNN-<title>.md` — plan from an ADR.
 - `/create-plan <issue-number>` — plan from an existing GitHub issue.
 
 ## Process
 
 1. **Read the input** fully. Also read everything it references: ADRs in
-   `docs/adr/`, requirements in `docs/requirements/`, existing LLDs in
+   `docs/adr/`, the root `REQUIREMENTS.md`, existing LLDs in
    `docs/design/`, and relevant source files.
 2. **Check existing state**: `gh issue list --state open --limit 50` and a scan
    of `docs/design/` to avoid duplicating epics, tasks, or LLDs that already
@@ -32,7 +32,7 @@ off cleanly to `/architect epic <n>`.
 6. **Report next step**: `/architect epic <n>` once the epic issue is created,
    or `/architect <plan-path>` if no epic issue yet.
 
-## Decomposition Rules (from ADR-0018 + `/architect`)
+## Decomposition Rules
 
 - One **epic** = one deliverable feature. The plan produces exactly one epic
   unless the input genuinely covers multiple unrelated deliverables.
@@ -41,8 +41,6 @@ off cleanly to `/architect epic <n>`.
   seam (independently testable, non-overlapping files).
 - Each task must name its design artefact need: new LLD, update to existing
   LLD, new ADR, or "covered by existing doc — BDD specs only".
-- L1–L5 labels describe design level, not hierarchy — tasks are typically
-  `L5-implementation`.
 
 ## Plan Template
 
@@ -91,8 +89,8 @@ plan sits at (usually Level 5 — Implementation, assuming Levels 1–4 exist).>
   - [ ] <from requirements>
 - **BDD sketch:**
   ```
-  describe('...')
-    it('...')
+  class TestContext:
+      test_behaviour_given_when_then
   ```
 
 ### Task 2: ...

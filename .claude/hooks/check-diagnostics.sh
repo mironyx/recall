@@ -71,7 +71,7 @@ process.stdin.on('end', () => {
   }
 
   // --- Map source file to its diagnostics export ---
-  // e.g. src/lib/engine/scoring.ts -> .diagnostics/src/lib/engine/scoring.ts.json
+  // e.g. src/recall/services/memory.py -> .diagnostics/src/recall/services/memory.py.json
   const diagFile = path.join(cwd, '.diagnostics', relPath + '.json');
 
   // --- Poll for fresh diagnostics (500ms intervals, up to 5s) ---

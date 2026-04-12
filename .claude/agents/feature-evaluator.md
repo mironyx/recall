@@ -78,14 +78,16 @@ Also write tests for these common gaps even if criteria appear covered:
 
 - **Boundary values** — empty inputs, maximum lengths, zero, negative numbers
 - **Error paths** — what happens when dependencies fail, inputs are invalid, state is unexpected?
-- **Type edges** — undefined vs null, empty string vs missing, empty array vs undefined
+- **Type edges** — `None` vs missing key, empty string vs missing, empty list vs `None`
 - **Concurrency** — if the feature involves async operations, what about race conditions?
-- **Security boundaries** — if the feature involves auth or permissions, can they be bypassed?
+- **Security boundaries** — if the feature involves auth or project scoping, can they be bypassed?
 
-Write these tests in a new file: `tests/evaluation/<feature-slug>.eval.test.ts`
+Write these tests in a new file: `tests/evaluation/test_<feature_slug>_eval.py`
 
-Use the same testing patterns as the existing test files (vitest, describe/it blocks,
-existing test helpers and factories). Read one existing test file to match the style.
+Use the same testing patterns as the existing test files (pytest, `TestX` classes or
+plain `test_*` functions, existing fixtures under `tests/conftest.py` or
+`tests/fixtures/`). Read one existing test file to match the style. For integration
+evaluation tests, use the real-Postgres fixture — never mock `AsyncPostgresStore`.
 
 **Reuse, do not duplicate, test boilerplate.** Before writing any mock setup, factory,
 or fixture in the eval file:
@@ -93,13 +95,15 @@ or fixture in the eval file:
 1. **Read the feature's own test files** (the ones passed in `test_files`) and note every
    helper: mock client builders, `makeX` factories, shared input constants, response
    helpers, etc.
-2. **Check `tests/fixtures/` and `tests/helpers/`** for anything already extracted.
+2. **Check `tests/fixtures/`, `tests/conftest.py`, and `tests/helpers/`** for anything
+   already extracted.
 3. **If a helper you need already exists, import it** — do not copy-paste it into the
    eval file.
 4. **If a helper is duplicated between the eval file and the feature's unit test file,
-   extract it into `tests/fixtures/<feature-slug>-mocks.ts`** and update both files to
-   import from there. The eval file is part of the repo's long-term test surface, so
-   duplication here is real technical debt, not throwaway code.
+   extract it into `tests/fixtures/<feature_slug>.py`** (or a shared `conftest.py` if
+   it's a pytest fixture) and update both files to import from there. The eval file
+   is part of the repo's long-term test surface, so duplication here is real technical
+   debt, not throwaway code.
 5. Only write a new helper in the eval file when the behaviour being probed genuinely
    needs a different mock shape than what already exists.
 
@@ -111,7 +115,7 @@ Keep tests focused — one assertion per test where possible.
 ### Step 5: Run all tests
 
 ```bash
-npx vitest run
+uv run pytest
 ```
 
 This runs the full suite including your new evaluation tests. Record results.
@@ -119,17 +123,17 @@ This runs the full suite including your new evaluation tests. Record results.
 If your new tests fail, that's a finding — don't fix the implementation. The failures
 are your evidence.
 
-If existing tests break after your additions (e.g. import side effects), fix your test
-file — not the implementation.
+If existing tests break after your additions (e.g. import side effects, fixture
+interference), fix your test file — not the implementation.
 
 ### Step 6: Check for silent failures
 
 Read the implementation files again. Look for:
 
-- `catch` blocks that swallow errors without logging
-- Promises without `.catch()` or `try/catch`
-- Conditional branches that silently return defaults instead of throwing
-- API responses that return 200 for error conditions
+- `except` blocks that swallow errors without logging or re-raise
+- Coroutines awaited inside a broad try/except that drops the failure
+- Conditional branches that silently return defaults instead of raising
+- MCP tool handlers that return a success-shaped result for an error condition
 - State that can become inconsistent without any error signal
 
 These are not test failures — they are design risks. Flag them separately.
@@ -151,7 +155,7 @@ Return a structured evaluation report:
 
 ### Adversarial tests
 
-- **Written:** N new tests in `tests/evaluation/<slug>.eval.test.ts`
+- **Written:** N new tests in `tests/evaluation/test_<slug>_eval.py`
 - **Passed:** N
 - **Failed:** N
 
