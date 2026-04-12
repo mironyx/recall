@@ -21,6 +21,11 @@ Scope determines isolation: a memory is either bound to a specific project or
 marked global. The scope invariant (project requires a project ID; global
 forbids one) is enforced at both the application and database level.
 
+Tags are stored as metadata on the record but are **not filterable** in v2
+search. Tag-based filtering is deferred until a workable approach is
+confirmed (see ADR-0004 amendment). This avoids the raw-SQL escape hatch and
+keeps the "boring storage" principle intact.
+
 **Covers:** Epic 1 (Stories 1.1, 1.2, 1.3), Epic 5 (Story 5.4)
 
 ### C2. Update and delete memories
@@ -45,10 +50,10 @@ ID.
 
 ### C4. Filter memories by structure
 
-The system shall support narrowing search results by kind, tags, scope, and
+The system shall support narrowing search results by kind, scope, and
 user ID. Filters compose conjunctively (AND). Combined with semantic ranking,
 this lets the agent ask "show me decisions about authentication in this
-project" without scanning everything.
+project" without scanning everything. Tag filtering is deferred (see C1).
 
 **Covers:** Epic 2 (Story 2.3)
 
@@ -56,9 +61,12 @@ project" without scanning everything.
 
 The system shall maintain instruction memories (a distinguished kind) at two
 layers — global and per-project — and compose them on demand. The agent
-retrieves composed instructions at session start; the global layer provides
-user preferences, the project layer provides repo-specific rules. Project
-instructions appear after global, giving them positional precedence.
+calls `instructions_get` when it needs guidance (typically at session start,
+but not exclusively — on-demand retrieval avoids polluting the context window
+with instructions that may not be relevant to the current task). The global
+layer provides user preferences; the project layer provides repo-specific
+rules. Project instructions appear after global, giving them positional
+precedence.
 
 **Covers:** Epic 3 (Stories 3.1, 3.2, 3.3, 3.4)
 
@@ -94,9 +102,10 @@ enables local development with zero external dependencies.
 
 ### C9. Guide agent integration
 
-The system shall ship reference instructions and MCP configuration snippets
-that teach agents when and how to use Recall's tools. These are documentation
-artefacts, not runtime behaviour.
+The system shall ship reference instructions (e.g., sample CLAUDE.md
+snippets, skill definitions) and MCP connection configuration snippets that
+teach agents when and how to use Recall's tools. These ship as files in the
+repository — they are not enforced by the server at runtime.
 
 **Covers:** Epic 7 (Stories 7.1, 7.2)
 
@@ -108,14 +117,13 @@ result status. Memory content is never logged at INFO level or above.
 
 **Covers:** Cross-cutting concern (Observability)
 
-### C11. Garbage-collect stale global memories
+### ~~C11. Garbage-collect stale global memories~~ (deferred to v2.1)
 
-The system shall provide a CLI command (run on demand or on a schedule) that
-reviews `scope=global` memories and can delete entries the agent never
-re-reads and flag near-duplicates for merge. LLM-driven reclassification
-(demoting a global memory to project-specific) is deferred to v2.1.
+Garbage collection of global memories (deleting unread entries, flagging
+near-duplicates, LLM-driven reclassification) is deferred to v2.1. In v2,
+operators curate memories manually via the MCP tools or direct DB access.
 
-**Covers:** Cross-cutting concern (Garbage collection)
+**Covers:** Cross-cutting concern (Garbage collection) — **deferred**
 
 ### C12. Export memories to JSON
 
@@ -220,8 +228,7 @@ delete.
   or updated
 - Execute semantic search via `AsyncPostgresStore.asearch`, merging project
   and global results with a project-scope tie-breaking boost
-- Apply filters (kind, scope, user_id) via store filter operators; apply tag
-  filters via the raw-SQL tag containment helper (ADR-0004)
+- Apply filters (kind, scope, user_id) via store filter operators (ADR-0004)
 - Validate scope invariant (project ↔ project_id) at the application layer
 - Truncate content to snippet length in search results
 - Reject immutable-field changes (scope, project_id) on update
@@ -352,20 +359,17 @@ OpenAI-compatible API.
 
 ### CLI
 
-**Purpose:** Provide operator-facing commands for migration, export, and
-garbage collection.
+**Purpose:** Provide operator-facing commands for migration and export.
 
 **Responsibilities:**
 - `recall serve` — start the MCP server
 - `recall db migrate` — run the Migration Runner
 - `recall export <project_id>` — dump a project's memories to JSON via
   Memory Service
-- `recall gc` — run the garbage-collection pass over global memories
 
 **Non-responsibilities:**
 - Does not serve the MCP protocol (that is MCP Transport via `recall serve`)
-- Does not implement the GC logic itself — delegates to Memory Service or a
-  dedicated GC module
+- Does not implement GC (deferred to v2.1)
 
 **Depends on:** Migration Runner, Memory Service, Configuration
 
@@ -435,7 +439,7 @@ sequenceDiagram
     participant M as Memory Service
     participant DB as Postgres
 
-    A->>T: memory_search(project_id, query, kind?, tags?, limit?)
+    A->>T: memory_search(project_id, query, kind?, scope?, user_id?, limit?)
     T->>R: dispatch(memory_search, params)
     R->>U: resolve(request)
     U-->>R: user_id
@@ -457,7 +461,7 @@ sequenceDiagram
 - Snippet truncation: max length, truncation strategy (character cut vs.
   sentence boundary)
 - Filter translation: how `kind`, `scope`, `user_id` map to store filter
-  dicts; how `tags` uses the raw-SQL helper (ADR-0004)
+  dicts (ADR-0004)
 - Default limit value
 
 ### Interaction 3: Retrieve composed instructions
@@ -544,10 +548,8 @@ sequenceDiagram
     T-->>A: structured error
 ```
 
-**Contracts to pin at Level 4:**
-- Header name and format for Wave 1 user identity
-- Whether user identity is validated (existence check vs. format-only)
-- Error shape for identity failures
+**Contracts to pin at Level 4:** User Resolver specifics (header name,
+validation rules, error shape) — deferred to LLD.
 
 ---
 
@@ -565,5 +567,5 @@ sequenceDiagram
 | C8. Deploy as infra | Config, Health Endpoints, Migration Runner, MCP Transport, CLI | 0003 |
 | C9. Agent guidance | (documentation only) | — |
 | C10. Log every tool call | Tool Router | — |
-| C11. GC stale globals | CLI, Memory Service, Postgres | — |
+| ~~C11. GC stale globals~~ | ~~deferred to v2.1~~ | — |
 | C12. Export to JSON | CLI, Memory Service | — |
