@@ -51,13 +51,26 @@ This hurts list-valued fields most. `tags: ["python", "async"]` cannot be filter
 - We will **not** carry a `FixedAsyncPostgresStore` subclass pre-emptively. Every line of code compensating for an upstream bug is a liability when upstream fixes it.
 - Verification: first integration test writes two memories with ISO timestamps one hour apart, asserts `$gte` on the midpoint returns only the later one. This locks the contract.
 
-### List-valued tag filters: single-tag `$eq` in v1, revisit if insufficient
+### List-valued tag filters: not filterable in v2
 
-- The `tags` field is a list of strings at the root of `value`.
-- The built-in filter compiler cannot query inside a list. For v1, tag filtering is **not exposed through the standard filter dict**. If the search tool needs "tagged X", it issues a raw-SQL predicate `value->'tags' ? %s` through a single well-named helper on the store wrapper — not a general "raw SQL" escape hatch, just one tag predicate.
-- This is the one crack we allow in "boring storage" (REQUIREMENTS.md principle 5), and it is scoped to a single JSONB operator on a single field. The alternative (per-tag boolean fields) pollutes the schema; post-filtering in Python is unsound at scale.
-- `$and` over multiple tags: chain `value->'tags' ?& array[%s, %s, ...]`. `$or`: `?|`. Both are single-expression, no loop.
-- Trigger to revisit: if the agent needs richer tag predicates (`NOT`, regex, hierarchical tags), escalate to a new ADR.
+**Amended 2026-04-12.** The original decision proposed a raw-SQL helper for
+tag containment. After further discussion, we decided against it:
+
+- The `tags` field is a list of strings stored at the root of `value`.
+- The built-in filter compiler cannot query inside a list (`$eq` compares
+  the whole array, not individual elements).
+- **Tags are stored but not filterable in v2.** The `memory_search` tool
+  does not accept a `tags` filter parameter. Tags exist on the record for
+  display and future use, but the server does not filter on them.
+- **No raw-SQL escape hatch.** The original proposal for a `value->'tags' ?`
+  helper is withdrawn. It would be the only raw SQL touching the store,
+  violating the "boring storage" principle (design principle 6) for a
+  feature that semantic search already handles well — if an agent needs
+  memories about "python", a semantic query for "python" works.
+- Trigger to revisit: if agents demonstrably need structured tag filtering
+  that semantic search cannot satisfy, propose a new ADR. Options at that
+  point: raw-SQL helper (scoped), post-filter in Python, or upstream
+  `$contains` support.
 
 ### Operator poverty in general
 
@@ -66,11 +79,11 @@ This hurts list-valued fields most. `tags: ["python", "async"]` cannot be filter
 ## Consequences
 
 - Timestamps are ISO strings, not integers or `datetime` objects, in the stored `value`. The Pydantic model serializes on put and parses on read. Documented in the memory model docstring.
-- One small raw-SQL helper exists for tag containment. It is the *only* place raw SQL touches the store, and it is covered by integration tests that assert the JSONB `?`, `?&`, `?|` operators behave as expected.
+- **No raw SQL in v2.** The store is used strictly through its public API (`asearch`, `aput`, `aget`). Zero raw-SQL helpers.
 - We do not subclass `AsyncPostgresStore`. The store is used as-is.
+- Tags are stored on the record but ignored by the search filter. Agents rely on semantic search to find memories by topic.
 - Integration tests that must exist before the search tool ships:
   - `$eq` on top-level `kind` — passes with flat shape (ADR 0001).
   - ISO timestamp `$gte` / `$lte` — guards the "no numeric filters" decision.
-  - Tag containment via the raw-SQL helper — guards the single escape hatch.
   - A negative test asserting nested `{"meta.kind": "x"}` returns zero — guards ADR 0001's flatness invariant.
 - If upstream fixes the numeric comparison bug (watch for a PR touching `_get_filter_condition`), we can relax the "no numeric filters" rule without code changes — only the ADR needs updating.
