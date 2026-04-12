@@ -1,7 +1,11 @@
-# Recall v1 — Implementation Plan
+# Recall v1 — Implementation Plan (SUPERSEDED)
+
+> **SUPERSEDED** — This plan has been superseded by the v2 implementation
+> plan. The v1 phasing informed v2 but the epics and tasks are replaced.
+> Kept for historical reference only.
 
 **Date:** 2026-04-10
-**Status:** draft for Gate 2 review
+**Status:** superseded
 **HLD:** [docs/design/v1-design.md](../design/v1-design.md)
 **Load-bearing ADRs:** 0001–0004 (carried forward), 0006–0013 (drafted in kickoff)
 

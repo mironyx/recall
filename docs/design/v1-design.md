@@ -1,6 +1,11 @@
-# Recall v1 — High-Level Design
+# Recall v1 — High-Level Design (SUPERSEDED)
 
-**Status:** draft
+> **SUPERSEDED** — This document has been superseded by
+> [docs/design/v2-design.md](v2-design.md). ADRs 0001–0013 produced during
+> the v1 kickoff remain accepted and are adopted by v2.
+> Kept for historical reference only.
+
+**Status:** superseded
 **Date:** 2026-04-09
 **Source of truth for requirements:** [REQUIREMENTS.md](../../REQUIREMENTS.md)
 **Load-bearing ADRs:** [0001](../adr/0001-flat-value-schema.md), [0002](../adr/0002-namespace-shape.md), [0003](../adr/0003-ttl-sweeper-ownership.md), [0004](../adr/0004-filter-limitations.md)
