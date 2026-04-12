@@ -108,6 +108,24 @@ For the full lifecycle, stages, human gates, artefact map, skills index, and ADR
 - `/feature-end` — Post-review wrap-up: writes session log, commits remaining changes, merges PR (with approval), switches to parent branch, cleans up local branch, updates project board.
 - `/drift-scan`, `/retro` — Periodic maintenance sweeps across requirements, design and code.
 
+## Custom Skills
+
+- `/discovery` — Explore a problem space from a freeform idea using adapted Lean Inception. Produces a structured discovery document (vision, boundaries, personas, journeys, features, MVP sequencing). Use before `/requirements` when starting a new project or major version.
+- `/requirements` — Transform discovery output or a freeform brief into a structured requirements document with epics, prioritised user stories, and testable acceptance criteria. Use after `/discovery` (or standalone) and before `/kickoff`.
+- `/kickoff` — Bootstrap a new project from a requirements document. Produces the HLD (Levels 1–3), load-bearing ADRs, and the implementation plan, with human gates after each. Use once per project/version before `/architect`.
+- `/architect` — Read a plan and produce all design artefacts in one pass (ADRs, LLDs, design doc updates, enriched issue bodies). Stops for human review before implementation.
+- `/feature` — Autonomous implementation cycle: picks top Todo item (or specified issue), creates branch, TDD implementation, `/diag`, commit, PR, `/pr-review-v2`. Stops after review for human approval.
+- `/feature-end` — Post-review wrap-up: writes session log, commits remaining changes, merges PR (with approval), switches to parent branch, cleans up.
+- `/feature-team` — Parallel implementation using Claude Code agent teams (CLI only). Each teammate autonomously implements one issue in its own worktree.
+- `/create-adr` — Create Architecture Decision Records for significant technical decisions.
+- `/create-plan` — Create detailed implementation plans for features or work phases.
+- `/lld` — Generate Low-Level Design documents for a phase or section. Produces LLDs with implementation detail, file paths, types, and task breakdowns.
+- `/lld-sync` — Sync the LLD back to the implementation after a feature is complete. Compares spec vs what was built, updates the LLD in-place.
+- `/diag` — Batch check diagnostics-exporter output for changed files. Detects, fixes, and verifies resolution.
+- `/pr-review-v2` — Review a PR for bugs, CLAUDE.md compliance, design contract adherence, and best practices. Usage: `/pr-review-v2 <pr-number>` or `/pr-review-v2` (local diff).
+- `/drift-scan` — Run garbage collection scan for drift between requirements, design artefacts, and implemented code.
+- `/retro` — Run a process retrospective: review sessions, assess process health, produce improvement actions.
+
 ## Task tracking
 
 GitHub Issues are the source of truth. The board, labels, and milestone conventions will be set up when the first epic lands. Until then, REQUIREMENTS.md drives the work.

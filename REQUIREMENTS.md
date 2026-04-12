@@ -135,6 +135,18 @@ Tools:
     - `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` — any OpenAI-compatible endpoint.
   - **Auth:** shared bearer tokens configured out-of-band (see S3.5).
   - **Observability:** `LOG_LEVEL` and the standard `OTEL_*` variables (see S6.3).
+
+  Comments: Provider abstraction with two shipped implementations: sentence-transformers (in-process) and openai (OpenAI-compatible HTTP, works with OpenAI/OpenRouter/vLLM/etc).
+No implicit default provider — EMBEDDINGS_PROVIDER, EMBEDDINGS_MODEL, EMBEDDINGS_DIM are all required config.
+Dim is locked per deployment in the vector(N) schema. Startup check compares configured dim to schema dim; mismatch = hard fail with a clear error. Changing model/dim requires re-embed + migration.
+In-process sentence-transformers for v1 (no sidecar). Sidecar pattern documented as a future upgrade path, not built.
+Integration tests + dev: sentence-transformers with a 768-dim model (likely BAAI/bge-base-en-v1.5 — confirm when we write the LLD). Zero network, deterministic, free.
+Prod: operator's choice. Two reference configs in docs:
+Self-hosted: sentence-transformers + 768-dim model (dev ≡ prod, zero cost).
+Hosted: openai + text-embedding-3-small (1536-dim, higher quality, paid).
+ADR captures: dim lock-in, startup guardrail, provider abstraction, in-process choice, dev-test-prod parity rationale.
+S5.1 env vars updated to the list above; OPENAI_API_KEY is no longer a hard requirement.
+
 - **S5.2** As an operator, `docker compose up` brings up Postgres + pgvector + LangMem locally for development.
 - **S5.3** As an operator, a `helm` chart or k8s manifest is provided for shared deployment. *(stretch — could be v2.1)*
 - **S5.4** As an operator, the server exposes `/healthz` and `/readyz`.
