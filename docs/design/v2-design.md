@@ -80,15 +80,17 @@ recovery hint.
 
 **Covers:** Epic 4 (Stories 4.1, 4.2, 4.3, 4.4)
 
-### C7. Identify users and isolate projects
+### C7. Authenticate users and isolate projects
 
-The system shall resolve a user identity on every request and record it on
-each memory. All users within a project share the same memory namespace —
-there is no per-user privacy within a project. Project IDs are validated
-against the established character rules (ADR-0002). The reserved name
-`global` (case-insensitive) is rejected as a project ID.
+The system shall authenticate every request via a shared bearer token
+(ADR-0007), resolving the token to a `user_id` that is recorded on each
+memory. All users within a project share the same memory namespace — there
+is no per-user privacy within a project. Projects are registered in a
+database table (ADR-0009) and managed via CLI; the reserved name `global`
+(case-insensitive) is rejected at the schema level. Project IDs are
+validated against the character rules in ADR-0002.
 
-**Covers:** Epic 5 (Stories 5.1, 5.2, 5.3, 5.4, 5.5)
+**Covers:** Epic 5 (Stories 5.1, 5.2, 5.3, 5.4, 5.5, 5.6)
 
 ### C8. Deploy as shared infrastructure
 
@@ -144,11 +146,12 @@ graph TB
 
     subgraph Recall["Recall Server (single container)"]
         Transport["MCP Transport"]
+        Auth["Auth"]
         ToolRouter["Tool Router"]
+        ProjectRegistry["Project Registry"]
         MemoryService["Memory Service"]
         InstructionService["Instruction Service"]
-        EmbeddingClient["Embedding Client"]
-        UserResolver["User Resolver"]
+        Embedder["Embedder"]
         Config["Configuration"]
         HealthEndpoints["Health Endpoints"]
         Migrations["Migration Runner"]
@@ -159,21 +162,24 @@ graph TB
     CLI["CLI (recall)"]
 
     Agent -->|Streamable HTTP| Transport
-    Transport --> ToolRouter
-    ToolRouter --> UserResolver
+    Transport --> Auth
+    Auth --> ToolRouter
+    ToolRouter --> ProjectRegistry
     ToolRouter --> MemoryService
     ToolRouter --> InstructionService
-    MemoryService --> EmbeddingClient
+    MemoryService --> Embedder
     MemoryService --> Postgres
     InstructionService --> Postgres
-    EmbeddingClient --> EmbeddingAPI
+    ProjectRegistry --> Postgres
+    Embedder -->|openai provider| EmbeddingAPI
     HealthEndpoints --> Postgres
     Migrations --> Postgres
-    Config -.->|env vars| Transport
-    Config -.->|env vars| EmbeddingClient
+    Config -.->|env vars + auth file| Auth
+    Config -.->|env vars| Embedder
     Config -.->|env vars| Postgres
     CLI --> Migrations
     CLI --> MemoryService
+    CLI --> ProjectRegistry
 ```
 
 ### MCP Transport
@@ -187,11 +193,11 @@ graph TB
 - Expose the server's tool listing with agent-oriented descriptions
 
 **Non-responsibilities:**
-- Does not authenticate requests (deferred to Wave 2)
-- Does not implement SSE, stdio, or WebSocket transports
+- Does not authenticate requests itself — delegates to Auth (ADR-0007)
+- Does not implement SSE, stdio, or WebSocket transports (ADR-0006)
 - Does not contain business logic — it is a protocol adapter
 
-**Depends on:** Tool Router, Configuration
+**Depends on:** Auth, Tool Router, Configuration
 
 ### Tool Router
 
@@ -199,8 +205,8 @@ graph TB
 concerns (user resolution, validation, error formatting).
 
 **Responsibilities:**
-- Receive a parsed tool call and resolve the user identity via User Resolver
-- Validate common parameters (scope, project_id format per ADR-0002)
+- Receive a parsed tool call with the authenticated `user_id` from Auth
+- Validate common parameters (scope, project_id against Project Registry)
 - Dispatch to Memory Service or Instruction Service based on tool name
 - Catch service exceptions and format them as structured MCP errors with
   `error` and `hint` fields
@@ -214,7 +220,7 @@ concerns (user resolution, validation, error formatting).
 - Does not generate embeddings
 - Does not know about the storage schema
 
-**Depends on:** Memory Service, Instruction Service, User Resolver
+**Depends on:** Memory Service, Instruction Service, Project Registry
 
 ### Memory Service
 
@@ -262,19 +268,22 @@ memories.
 
 **Depends on:** Postgres (via AsyncPostgresStore)
 
-### Embedding Client
+### Embedder
 
-**Purpose:** Generate vector embeddings for memory content via an
-OpenAI-compatible API.
+**Purpose:** Generate vector embeddings for memory content via a pluggable
+provider interface (ADR-0008).
 
 **Responsibilities:**
-- Accept text content and return an embedding vector
-- Authenticate with the configured API key
-- Route requests to the configured base URL (supporting OpenAI-compatible
-  endpoints)
-- Implement a single retry on transient failure
-- Raise a structured error if both attempts fail — never return silently
-  without an embedding
+- Expose a provider-agnostic interface: `dim: int` and
+  `embed(texts: list[str]) -> list[Vector]`
+- Support two providers selected by `EMBEDDINGS_PROVIDER`:
+  - `sentence-transformers` — in-process, no network call, no API key
+  - `openai` — calls any OpenAI-compatible endpoint via `EMBEDDINGS_BASE_URL`
+- Validate `EMBEDDINGS_DIM` matches the existing `vector(N)` column at
+  startup (fail-fast on mismatch)
+- Implement a single retry on transient failure for the HTTP provider
+- Raise a structured error if embedding fails — never return silently
+- Run in-process providers on a thread pool to avoid blocking the event loop
 
 **Non-responsibilities:**
 - Does not decide when to embed — that is Memory Service's responsibility
@@ -282,42 +291,67 @@ OpenAI-compatible API.
   its index configuration
 - Does not cache embeddings
 
-**Depends on:** OpenAI-compatible Embedding API (external), Configuration
+**Depends on:** OpenAI-compatible Embedding API (external, for `openai`
+provider), Configuration
 
-### User Resolver
+### Auth
 
-**Purpose:** Extract a user identity from each incoming request.
+**Purpose:** Authenticate every request via bearer token and resolve a
+`user_id` (ADR-0007).
 
 **Responsibilities:**
-- Read the user identifier from the request (e.g., `X-User-ID` header in
-  Wave 1)
-- Reject requests with no resolvable user identity with a structured error
-- Provide the resolved `user_id` to the Tool Router for propagation into
-  service calls
+- Read the `Authorization: Bearer <token>` header from incoming requests
+- Look up the token in an in-memory map loaded from `RECALL_AUTH_FILE` at
+  startup
+- Reject requests with missing, malformed, or unknown tokens with a
+  structured `{error: "unauthenticated", hint}` error
+- Inject the resolved `user_id` into the request context for downstream use
 
 **Non-responsibilities:**
-- Does not authenticate the user (Wave 2)
 - Does not manage user accounts or profiles
 - Does not authorise — all authenticated users have equal access within a
   project
+- Does not implement OIDC or mTLS (deferred to Wave 2)
 
 **Depends on:** Configuration
+
+### Project Registry
+
+**Purpose:** Maintain the list of valid project IDs and validate them on
+every request (ADR-0009).
+
+**Responsibilities:**
+- Source the project list from a `projects` table in Postgres
+- Cache the table contents in memory; refresh on cache miss before rejecting
+- Reject requests with unknown `project_id` with a structured error
+- Enforce the `global` reserved name at the schema level (CHECK constraint)
+- Expose `recall projects add|list|remove` CLI commands for operators
+
+**Non-responsibilities:**
+- Does not manage memory storage — that is Memory Service
+- Does not own the `(scope, project_id)` namespace — that is ADR-0002
+- Does not provide an MCP tool for project management — projects are
+  operator concerns
+
+**Depends on:** Postgres, Configuration
 
 ### Configuration
 
 **Purpose:** Load and validate all runtime settings from environment variables.
 
 **Responsibilities:**
-- Read required variables (`DATABASE_URL`, `OPENAI_API_KEY`) and optional
-  variables (`OPENAI_BASE_URL`, `RECALL_HOST`, `RECALL_PORT`)
+- Read required variables (`DATABASE_URL`, `RECALL_AUTH_FILE`,
+  `EMBEDDINGS_PROVIDER`, `EMBEDDINGS_MODEL`) and optional variables
+  (`EMBEDDINGS_BASE_URL`, `EMBEDDINGS_API_KEY`, `EMBEDDINGS_DIM`,
+  `RECALL_HOST`, `RECALL_PORT`, `LOG_LEVEL`, `OTEL_EXPORTER_OTLP_ENDPOINT`)
+- Load the auth token file referenced by `RECALL_AUTH_FILE`
 - Fail fast on startup if required variables are missing, listing all missing
   variables in a single error message
 - Provide typed, validated settings to all components that need them
 
 **Non-responsibilities:**
-- Does not read config files — environment variables only
 - Does not watch for runtime config changes — settings are immutable after
-  startup
+  startup (restart to reload auth file)
 
 **Depends on:** Nothing (leaf component)
 
@@ -339,31 +373,34 @@ OpenAI-compatible API.
 
 ### Migration Runner
 
-**Purpose:** Bring the database schema up to date.
+**Purpose:** Bring the database schema up to date via an in-app DDL runner
+(ADR-0013).
 
 **Responsibilities:**
-- Invoke `AsyncPostgresStore.setup()` to run pending store and vector
-  migrations
-- Apply any Recall-specific migrations (e.g., CHECK constraints for the scope
-  invariant) via a lightweight migration framework
-- Expose as both a CLI command (`recall db migrate`) and an optional
-  auto-migrate-on-startup mode
+- Run numbered SQL migration files from `src/recall/migrations/` in order
+- Track applied versions in a `schema_migrations` table
+- Invoke `AsyncPostgresStore.setup()` from within the relevant migration file
+- Create the `projects` table (ADR-0009) and scope CHECK constraints
+- Expose as CLI command (`recall db migrate`) and auto-migrate-on-startup
+  (default on, controlled by `RECALL_DB_MIGRATE_ON_STARTUP`)
 - Be idempotent — running twice changes nothing
+- Lock the migrations table to prevent concurrent application
 
 **Non-responsibilities:**
 - Does not manage data migrations (backfills)
 - Does not handle down-migrations — schema changes are additive
-- Does not bypass `AsyncPostgresStore.setup()` for store-owned tables
 
 **Depends on:** Postgres, Configuration
 
 ### CLI
 
-**Purpose:** Provide operator-facing commands for migration and export.
+**Purpose:** Provide operator-facing commands for migration, project
+management, and export.
 
 **Responsibilities:**
 - `recall serve` — start the MCP server
 - `recall db migrate` — run the Migration Runner
+- `recall projects add|list|remove` — manage the project registry (ADR-0009)
 - `recall export <project_id>` — dump a project's memories to JSON via
   Memory Service
 
@@ -371,7 +408,8 @@ OpenAI-compatible API.
 - Does not serve the MCP protocol (that is MCP Transport via `recall serve`)
 - Does not implement GC (deferred to v2.1)
 
-**Depends on:** Migration Runner, Memory Service, Configuration
+**Depends on:** Migration Runner, Memory Service, Project Registry,
+Configuration
 
 ### Architectural invariants
 
@@ -379,10 +417,13 @@ OpenAI-compatible API.
    All persistence is in Postgres. Any client connecting to the same database
    sees the same data, ensuring cross-machine visibility (Story 5.2).
 
-2. **Structured logging.** Every MCP tool invocation is logged with:
-   request ID, user ID, project ID, tool name, latency (ms), result status.
-   Memory content is never logged at INFO level or above. Logging is the
-   responsibility of the Tool Router (which sees all tool calls).
+2. **Structured logging (ADR-0011).** All log output goes through a single
+   `structlog` logger emitting JSON on stdout. Every MCP tool invocation
+   emits one `mcp_call` event with: request ID, user ID, project ID, tool
+   name, latency (ms), result status, trace ID, span ID. Memory content is
+   never logged at INFO level or above. OpenTelemetry auto-instrumentation
+   (HTTP, asyncpg, outbound HTTP) is available but off by default — activated
+   by setting `OTEL_EXPORTER_OTLP_ENDPOINT`.
 
 3. **Operator curation.** Operators may curate instruction memories and any
    other memories via the existing MCP tools or direct database access.
@@ -399,14 +440,14 @@ sequenceDiagram
     participant A as Agent
     participant T as MCP Transport
     participant R as Tool Router
-    participant U as User Resolver
+    participant U as Auth
     participant M as Memory Service
     participant E as Embedding Client
     participant DB as Postgres
 
     A->>T: memory_save(scope, project_id, kind, title, content, tags?)
     T->>R: dispatch(memory_save, params)
-    R->>U: resolve(request)
+    R->>U: authenticate(request)
     U-->>R: user_id
     R->>R: validate scope + project_id format
     R->>M: save(scope, project_id, user_id, kind, title, content, tags)
@@ -435,13 +476,13 @@ sequenceDiagram
     participant A as Agent
     participant T as MCP Transport
     participant R as Tool Router
-    participant U as User Resolver
+    participant U as Auth
     participant M as Memory Service
     participant DB as Postgres
 
     A->>T: memory_search(project_id, query, kind?, scope?, user_id?, limit?)
     T->>R: dispatch(memory_search, params)
-    R->>U: resolve(request)
+    R->>U: authenticate(request)
     U-->>R: user_id
     R->>M: search(project_id, query, filters, limit)
     M->>DB: asearch(namespace=("project", pid), query=query, filter=filters)
@@ -471,13 +512,13 @@ sequenceDiagram
     participant A as Agent
     participant T as MCP Transport
     participant R as Tool Router
-    participant U as User Resolver
+    participant U as Auth
     participant I as Instruction Service
     participant DB as Postgres
 
     A->>T: instructions_get(project_id)
     T->>R: dispatch(instructions_get, params)
-    R->>U: resolve(request)
+    R->>U: authenticate(request)
     U-->>R: user_id
     R->>I: get_instructions(project_id)
     I->>DB: asearch(namespace=("global", "_"), filter={kind: "instruction"})
@@ -531,25 +572,25 @@ sequenceDiagram
   fails — no partial writes
 - Error shape: same `{error, hint}` as all other errors
 
-### Interaction 5: User identity missing (trust boundary)
+### Interaction 5: Authentication failure (trust boundary)
 
 ```mermaid
 sequenceDiagram
     participant A as Agent
     participant T as MCP Transport
     participant R as Tool Router
-    participant U as User Resolver
+    participant U as Auth
 
-    A->>T: memory_save(...) [no X-User-ID header]
+    A->>T: memory_save(...) [no or invalid bearer token]
     T->>R: dispatch(memory_save, params)
-    R->>U: resolve(request)
-    U-->>R: raise UserIdentityError
-    R-->>T: MCP error {error: "User identity required", hint: "Set X-User-ID header"}
+    R->>U: authenticate(request)
+    U-->>R: raise UnauthenticatedError
+    R-->>T: MCP error {error: "unauthenticated", hint: "Provide Authorization: Bearer <token>"}
     T-->>A: structured error
 ```
 
-**Contracts to pin at Level 4:** User Resolver specifics (header name,
-validation rules, error shape) — deferred to LLD.
+**Contracts to pin at Level 4:** Auth token file format, error shape —
+details in ADR-0007, LLD to specify exact implementation.
 
 ---
 
@@ -557,15 +598,15 @@ validation rules, error shape) — deferred to LLD.
 
 | Capability | Components Involved | ADRs |
 |------------|-------------------|------|
-| C1. Persist memories | Tool Router, Memory Service, Embedding Client, Postgres | 0001, 0002 |
-| C2. Update/delete | Tool Router, Memory Service, Embedding Client, Postgres | 0001 |
-| C3. Discover by meaning | Tool Router, Memory Service, Postgres | 0001, 0002 |
+| C1. Persist memories | Tool Router, Memory Service, Embedder, Postgres | 0001, 0002, 0008 |
+| C2. Update/delete | Tool Router, Memory Service, Embedder, Postgres | 0001 |
+| C3. Discover by meaning | Tool Router, Memory Service, Postgres | 0001, 0002, 0010 |
 | C4. Filter by structure | Tool Router, Memory Service, Postgres | 0001, 0004 |
 | C5. Layered instructions | Tool Router, Instruction Service, Postgres | 0001, 0002 |
-| C6. MCP tools | MCP Transport, Tool Router | — |
-| C7. User/project identity | User Resolver, Tool Router | 0002 |
-| C8. Deploy as infra | Config, Health Endpoints, Migration Runner, MCP Transport, CLI | 0003 |
+| C6. MCP tools | MCP Transport, Tool Router | 0006 |
+| C7. Auth + project identity | Auth, Project Registry, Tool Router | 0002, 0007, 0009 |
+| C8. Deploy as infra | Config, Health Endpoints, Migration Runner, MCP Transport, CLI | 0003, 0013 |
 | C9. Agent guidance | (documentation only) | — |
-| C10. Log every tool call | Tool Router | — |
+| C10. Log every tool call | Tool Router | 0011 |
 | ~~C11. GC stale globals~~ | ~~deferred to v2.1~~ | — |
 | C12. Export to JSON | CLI, Memory Service | — |
