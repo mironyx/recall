@@ -100,6 +100,30 @@ artefacts, not runtime behaviour.
 
 **Covers:** Epic 7 (Stories 7.1, 7.2)
 
+### C10. Log every tool call
+
+The system shall emit a structured log entry for every MCP tool invocation,
+including request ID, user ID, project ID, tool name, latency (ms), and
+result status. Memory content is never logged at INFO level or above.
+
+**Covers:** Cross-cutting concern (Observability)
+
+### C11. Garbage-collect stale global memories
+
+The system shall provide a CLI command (run on demand or on a schedule) that
+reviews `scope=global` memories and can delete entries the agent never
+re-reads and flag near-duplicates for merge. LLM-driven reclassification
+(demoting a global memory to project-specific) is deferred to v2.1.
+
+**Covers:** Cross-cutting concern (Garbage collection)
+
+### C12. Export memories to JSON
+
+The system shall allow an operator to dump a project's memories to JSON for
+backup or inspection via a CLI command.
+
+**Covers:** Cross-cutting concern (JSON export)
+
 ---
 
 ## Level 2 — Components
@@ -124,6 +148,7 @@ graph TB
 
     Postgres["Postgres + pgvector"]
     EmbeddingAPI["OpenAI-compatible Embedding API"]
+    CLI["CLI (recall)"]
 
     Agent -->|Streamable HTTP| Transport
     Transport --> ToolRouter
@@ -139,6 +164,8 @@ graph TB
     Config -.->|env vars| Transport
     Config -.->|env vars| EmbeddingClient
     Config -.->|env vars| Postgres
+    CLI --> Migrations
+    CLI --> MemoryService
 ```
 
 ### MCP Transport
@@ -170,6 +197,9 @@ concerns (user resolution, validation, error formatting).
 - Catch service exceptions and format them as structured MCP errors with
   `error` and `hint` fields
 - Enforce the tool budget by being the single place where tools are registered
+- Emit a structured log entry for every tool call (request ID, user ID,
+  project ID, tool name, latency, result status) — see Architectural
+  Invariants
 
 **Non-responsibilities:**
 - Does not own persistence logic
@@ -319,6 +349,40 @@ OpenAI-compatible API.
 - Does not bypass `AsyncPostgresStore.setup()` for store-owned tables
 
 **Depends on:** Postgres, Configuration
+
+### CLI
+
+**Purpose:** Provide operator-facing commands for migration, export, and
+garbage collection.
+
+**Responsibilities:**
+- `recall serve` — start the MCP server
+- `recall db migrate` — run the Migration Runner
+- `recall export <project_id>` — dump a project's memories to JSON via
+  Memory Service
+- `recall gc` — run the garbage-collection pass over global memories
+
+**Non-responsibilities:**
+- Does not serve the MCP protocol (that is MCP Transport via `recall serve`)
+- Does not implement the GC logic itself — delegates to Memory Service or a
+  dedicated GC module
+
+**Depends on:** Migration Runner, Memory Service, Configuration
+
+### Architectural invariants
+
+1. **Statelessness.** The server holds no per-client or per-machine state.
+   All persistence is in Postgres. Any client connecting to the same database
+   sees the same data, ensuring cross-machine visibility (Story 5.2).
+
+2. **Structured logging.** Every MCP tool invocation is logged with:
+   request ID, user ID, project ID, tool name, latency (ms), result status.
+   Memory content is never logged at INFO level or above. Logging is the
+   responsibility of the Tool Router (which sees all tool calls).
+
+3. **Operator curation.** Operators may curate instruction memories and any
+   other memories via the existing MCP tools or direct database access.
+   No separate admin interface is provided in v2 (Story 3.4).
 
 ---
 
@@ -498,5 +562,8 @@ sequenceDiagram
 | C5. Layered instructions | Tool Router, Instruction Service, Postgres | 0001, 0002 |
 | C6. MCP tools | MCP Transport, Tool Router | — |
 | C7. User/project identity | User Resolver, Tool Router | 0002 |
-| C8. Deploy as infra | Config, Health Endpoints, Migration Runner, MCP Transport | 0003 |
+| C8. Deploy as infra | Config, Health Endpoints, Migration Runner, MCP Transport, CLI | 0003 |
 | C9. Agent guidance | (documentation only) | — |
+| C10. Log every tool call | Tool Router | — |
+| C11. GC stale globals | CLI, Memory Service, Postgres | — |
+| C12. Export to JSON | CLI, Memory Service | — |
