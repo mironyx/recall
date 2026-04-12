@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A small, focused MCP server that gives coding agents persistent memory across sessions, machines, and projects. Successor to LangMem v1, deliberately rebuilt to be smaller, simpler, and agent-first.
 
-**Current phase:** Phase 0 — Foundation (scaffolding, CI, container, real-Postgres test fixture). See [docs/plans/2026-04-10-v1-implementation-plan.md](docs/plans/2026-04-10-v1-implementation-plan.md) for the full phasing and [docs/design/v1-design.md](docs/design/v1-design.md) for the HLD.
+**Current phase:** Phase 0 — Foundation (scaffolding, CI, container, real-Postgres test fixture). See [docs/plans/2026-04-12-v2-implementation-plan.md](docs/plans/2026-04-12-v2-implementation-plan.md) for the full phasing and [docs/design/v2-design.md](docs/design/v2-design.md) for the HLD.
 
 **The full product spec lives in [docs/requirements/v2-requirements.md](docs/requirements/v2-requirements.md). Read it before starting any non-trivial change.**
 
@@ -18,14 +18,14 @@ A small, focused MCP server that gives coding agents persistent memory across se
 - **Type checker:** `mypy --strict`
 - **Tests:** `pytest` + `pytest-asyncio`; integration tests use `testcontainers` against real Postgres
 - **Storage:** Postgres + `pgvector`, accessed via LangGraph `AsyncPostgresStore`
-- **Embeddings:** OpenAI (or any OpenAI-compatible endpoint)
+- **Embeddings:** Dual provider — sentence-transformers (in-process) or OpenAI-compatible HTTP (ADR-0008)
 - **MCP transport:** Streamable HTTP (no SSE shim)
 - **Deployment:** single container
 
 ## Design principles (from REQUIREMENTS.md)
 
-1. **Few tools, broad tools.** ≤ 6 MCP tools total. Tool design is prompt design — the agent is the user.
-2. **Two scopes: project and global.** A memory is bound to a `project_id` or marked `scope=global`. Storage namespace is `(scope, project_id)`. See REQUIREMENTS.md S1.7 / S3.7 for the invariant.
+1. **Few tools, broad tools.** ≤ 6 MCP tools total (5 in v2). Tool design is prompt design — the agent is the user.
+2. **Two scopes: project and global.** A memory is bound to a `project_id` or marked `scope=global`. Storage namespace is `(scope, project_id)` (ADR-0002).
 3. **Categories are data, not classes.** A memory has a `kind` field; adding a kind is a config change, not a new class.
 4. **One server, one transport, one entrypoint.** No parallel implementations.
 5. **Boring storage.** No bespoke abstractions on top of `AsyncPostgresStore` until proven necessary.
@@ -70,20 +70,20 @@ uv run recall db migrate
 ## Repository layout
 
 ```
-src/recall/        # Application code (package)
-tests/             # pytest tests; integration tests marked with @pytest.mark.integration
-scripts/           # Operational + Claude-Code helper scripts
-docs/              # ADRs, LLDs, runbooks (created as needed)
-.claude/           # Skills, agents, commands, hooks, settings
-REQUIREMENTS.md    # Product spec — source of truth for what we're building
+src/recall/           # Application code (package)
+src/recall/migrations/ # Numbered SQL migration files (ADR-0013)
+tests/                # pytest tests; integration tests marked with @pytest.mark.integration
+scripts/              # Operational + Claude-Code helper scripts
+docs/                 # ADRs, design, plans, requirements, references
+.claude/              # Skills, agents, commands, hooks, settings
 ```
 
 ## Things to never do
 
 - **Never mock the database in tests.** Integration tests must hit a real Postgres via testcontainers. The whole point is catching schema/migration drift.
 - **Never bypass `ruff` / `mypy` / pre-commit hooks** with `--no-verify`. If a check fails, fix the underlying issue.
-- **Never add a new MCP tool without updating REQUIREMENTS.md E2** and getting agreement that the tool budget (≤ 6) is still respected.
-- **Never store project-specific state in `scope=global` memories.** See REQUIREMENTS.md S1.8 for the decision rule.
+- **Never add a new MCP tool without updating the tool reference table in v2-requirements.md** and getting agreement that the tool budget (≤ 6) is still respected.
+- **Never store project-specific state in `scope=global` memories.** The scope decision rule: "if this fact would still be true and useful in a brand-new empty repo tomorrow, save it as global; otherwise project."
 - **Never widen the storage namespace** beyond `(scope, project_id)` without an ADR.
 
 ## Local references
@@ -128,4 +128,4 @@ For the full lifecycle, stages, human gates, artefact map, skills index, and ADR
 
 ## Task tracking
 
-GitHub Issues are the source of truth. The board, labels, and milestone conventions will be set up when the first epic lands. Until then, REQUIREMENTS.md drives the work.
+GitHub Issues are the source of truth. The board (GitHub Project #3) is set up with epics for all phases and task issues for Phase 0. Labels: `epic`, `phase-0` through `phase-5`, `area:*`, `kind:scaffold`. Use `./scripts/gh-project-status.sh` to manage board state.
