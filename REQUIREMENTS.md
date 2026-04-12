@@ -1,6 +1,10 @@
-# LangMem v2 — Requirements
+# LangMem v2 — Requirements (OBSOLETE)
 
-**Status:** draft for review
+> **OBSOLETE** — This document has been superseded by
+> [docs/requirements/v2-requirements.md](docs/requirements/v2-requirements.md).
+> Kept for historical reference only. Do not use for implementation decisions.
+
+**Status:** obsolete
 **Date:** 2026-04-08
 **Supersedes:** the POC on `master`. This is a greenfield rewrite, not a refactor.
 

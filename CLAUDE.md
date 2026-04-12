@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A small, focused MCP server that gives coding agents persistent memory across sessions, machines, and projects. Successor to LangMem v1, deliberately rebuilt to be smaller, simpler, and agent-first.
 
-**The full product spec lives in [REQUIREMENTS.md](REQUIREMENTS.md). Read it before starting any non-trivial change.**
+**The full product spec lives in [docs/requirements/v2-requirements.md](docs/requirements/v2-requirements.md). Read it before starting any non-trivial change.**
 
 ## Tech stack
 
