@@ -258,22 +258,19 @@ The primary value delivery. Agents find relevant memories through semantic searc
 
 ## Epic 3: Self-Improving Instructions [Priority: High]
 
-The procedural-memory idea from v1, simplified. Instructions are **layered**: a global "how this user likes to work" layer composed with a project-level "how to behave in this repo" layer. The agent reads the composed result at session start and proposes edits to either layer over time. This is the 6th MCP tool and a key differentiator.
+The procedural-memory idea from v1, simplified. Instructions are ordinary memories with `kind=instruction` — no dedicated tool, no server-side composition. The agent stores them via `memory_save` and retrieves them via `memory_search(kind="instruction")`. Global-scoped instructions carry user/workflow preferences; project-scoped instructions carry repo-specific rules. The agent reads both and applies them in order (project after global for natural override).
 
-### Story 3.1: Retrieve composed instructions
+### Story 3.1: Retrieve instructions via search
 
 **As an** agent,
-**I want to** call `instructions_get(project_id)` at the start of a session and receive layered instructions (global first, then project),
-**so that** I have both cross-project user preferences and repo-specific rules in my working context from the outset.
+**I want to** search for instruction memories using `memory_search(project_id, query, kind="instruction")`,
+**so that** I can find relevant behavioural guidance without a dedicated tool.
 
 **Acceptance Criteria:**
 
-- Given global-scoped instruction memories exist and project-scoped instruction memories exist for the given project ID, when I call `instructions_get(project_id)`, then the response contains both layers concatenated: global instructions first, project instructions second.
-- Given the returned instructions, when inspected, then clear section markers separate the global layer from the project layer, so both the agent and a human reviewer can tell them apart.
-- Given multiple instruction memories in a single layer, when the layer is composed, then instructions are ordered by recency (most recent last) or by a `priority` metadata field if present.
-- Given no instruction memories exist (neither global nor for the project), when I call `instructions_get(project_id)`, then an empty response is returned (not an error).
-- Given only global instruction memories exist (none for the project), when I call `instructions_get(project_id)`, then only the global layer is returned.
-- Given only project instruction memories exist (no global), when I call `instructions_get(project_id)`, then only the project layer is returned.
+- Given global-scoped instruction memories exist and project-scoped instruction memories exist for the given project ID, when I call `memory_search` with `kind="instruction"`, then both scopes are included in the merged result list per the standard ranking rule (ADR-0010).
+- Given no instruction memories exist, when I search with `kind="instruction"`, then an empty result list is returned (not an error).
+- Given only global instruction memories exist, when I search within a project, then the global instructions appear in results.
 
 ---
 
@@ -281,46 +278,45 @@ The procedural-memory idea from v1, simplified. Instructions are **layered**: a 
 
 **As an** agent,
 **I want to** save a durable lesson as `kind=instruction` via `memory_save`, choosing global scope for user/workflow preferences and project scope for repo-specific rules,
-**so that** the instruction is included in future `instructions_get` responses.
+**so that** the instruction is discoverable via future `memory_search` calls.
 
 **Acceptance Criteria:**
 
-- Given I save a memory with `kind=instruction` and `scope=global`, when I subsequently call `instructions_get(project_id)` for any project, then that instruction appears in the global layer of the response.
-- Given I save a memory with `kind=instruction` and `scope=project` for project X, when I call `instructions_get` for project X, then that instruction appears in the project layer.
-- Given I save a memory with `kind=instruction` and `scope=project` for project X, when I call `instructions_get` for a different project Y, then that instruction does not appear.
-- Given a saved instruction, when I update its content via `memory_update`, then the next call to `instructions_get` reflects the updated content.
-- Given a saved instruction, when I delete it via `memory_delete`, then the next call to `instructions_get` no longer includes it.
+- Given I save a memory with `kind=instruction` and `scope=global`, when I subsequently search with `kind="instruction"` from any project, then that instruction appears in the results.
+- Given I save a memory with `kind=instruction` and `scope=project` for project X, when I search in project X, then that instruction appears.
+- Given I save a memory with `kind=instruction` and `scope=project` for project X, when I search in a different project Y, then that instruction does not appear.
+- Given a saved instruction, when I update its content via `memory_update`, then subsequent searches reflect the updated content.
+- Given a saved instruction, when I delete it via `memory_delete`, then it no longer appears in search results.
 
-**Notes:** Instructions use the same `memory_save` / `memory_update` / `memory_delete` tools as any other memory. The `kind=instruction` value is what identifies them; `instructions_get` filters on this kind. Same scope decision rule as Story 1.1: "user wants terse PR descriptions" is global; "always run `make fmt` before commit in this repo" is project.
+**Notes:** Instructions use the same `memory_save` / `memory_update` / `memory_delete` tools as any other memory. The `kind=instruction` value is what identifies them. Same scope decision rule as Story 1.1: "user wants terse PR descriptions" is global; "always run `make fmt` before commit in this repo" is project.
 
 ---
 
-### Story 3.3: Project instructions override global
+### Story 3.3: Project instructions override global (by convention)
 
 **As an** agent,
-**I want to** project-level instructions to take precedence over global instructions when they conflict,
-**so that** repo-specific rules can override general preferences without requiring the global instruction to be deleted.
+**I want** the reference agent instructions to document that project-scoped instructions take precedence over global ones when they conflict,
+**so that** repo-specific rules can override general preferences.
 
 **Acceptance Criteria:**
 
-- Given a global instruction stating "use tabs for indentation" and a project instruction stating "use spaces for indentation", when I call `instructions_get` for that project, then both instructions are returned with the project instruction appearing after the global instruction (project layer follows global layer).
-- Given the layered ordering (global first, project second), when the agent processes the instructions, then later instructions naturally override earlier ones — the project layer has the last word.
+- Given the reference agent instructions (Epic 7), when inspected, then they document the convention: "when global and project instructions conflict, follow the project instruction."
+- Given the merged search results, when the agent reads them, then project-scoped results naturally appear with a ranking boost (ADR-0010), reinforcing the convention.
 
-**Notes:** Conflict resolution is positional, not semantic. The system does not detect contradictions — it relies on the agent processing instructions in order, where later entries override earlier ones. This is the simplest mechanism that works.
+**Notes:** Conflict resolution is by agent convention documented in the reference instructions, not by server-side composition. The system does not detect contradictions.
 
 ---
 
 ### Story 3.4: Operator curation of instructions
 
 **As an** operator,
-**I want to** review and curate instructions in either layer (remove stale entries, merge duplicates),
+**I want to** review and curate instructions (remove stale entries, merge duplicates),
 **so that** the instruction set stays clean and relevant over time.
 
 **Acceptance Criteria:**
 
-- Given instruction memories stored in the database, when an operator queries the database directly (SQL), then instruction memories are identifiable by `kind=instruction` and their scope/project ID.
-- Given an operator identifies a stale instruction, when they delete or update it via direct database access or the MCP tools, then subsequent `instructions_get` calls reflect the change.
-- Given the need for a management CLI, then this is deferred to a later story — initial curation is via direct DB access or the existing MCP tools.
+- Given instruction memories stored in the database, when an operator queries the database directly (SQL) or uses the MCP tools, then instruction memories are identifiable by `kind=instruction` and their scope/project ID.
+- Given an operator identifies a stale instruction, when they delete or update it via the MCP tools or direct database access, then subsequent searches reflect the change.
 
 ---
 
@@ -348,11 +344,12 @@ The following tools constitute the full MCP surface. This is the product interfa
 | # | Tool | Parameters | Returns | Purpose |
 |---|------|-----------|---------|---------|
 | 1 | `memory_save` | `scope`, `project_id?`, `kind`, `title`, `content`, `tags?`, `metadata?` | `{id}` | Persist a new memory. `scope` is `"project"` or `"global"`. `project_id` required when `scope="project"`, forbidden when `scope="global"`. |
-| 2 | `memory_search` | `project_id`, `query`, `kind?`, `tags?`, `scope?`, `user_id?`, `limit?` | `[{id, scope, kind, title, snippet, score}]` | Semantic search. Searches the given project **and** global by default; pass `scope` to restrict. |
+| 2 | `memory_search` | `project_id`, `query`, `kind?`, `tags?`, `scope?`, `user_id?`, `limit?` | `[{id, scope, kind, title, snippet, score}]` | Semantic search. Searches the given project **and** global by default; pass `scope` to restrict. Instructions are retrieved via `kind="instruction"`. |
 | 3 | `memory_get` | `id` | Full memory record | Fetch the complete record for a memory found via search. |
 | 4 | `memory_update` | `id`, `content?`, `tags?`, `metadata?` | `{id}` | Update an existing memory's content, tags, or metadata. |
 | 5 | `memory_delete` | `id` | `{ok}` | Permanently remove a memory. |
-| 6 | `instructions_get` | `project_id` | Layered instruction text | Retrieve composed global + project instructions for session start. |
+
+**Note:** There is no dedicated `instructions_get` tool. Instructions are ordinary memories with `kind=instruction`, retrieved via `memory_search`. This keeps the tool count at 5, leaving room for a future tool within the ≤ 6 budget.
 
 ---
 

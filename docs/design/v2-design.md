@@ -57,16 +57,16 @@ project" without scanning everything. Tag filtering is deferred (see C1).
 
 **Covers:** Epic 2 (Story 2.3)
 
-### C5. Compose layered instructions
+### C5. Self-improving instructions as ordinary memories
 
-The system shall maintain instruction memories (a distinguished kind) at two
-layers — global and per-project — and compose them on demand. The agent
-calls `instructions_get` when it needs guidance (typically at session start,
-but not exclusively — on-demand retrieval avoids polluting the context window
-with instructions that may not be relevant to the current task). The global
-layer provides user preferences; the project layer provides repo-specific
-rules. Project instructions appear after global, giving them positional
-precedence.
+The system shall treat behavioural guidance the agent writes for itself as
+memories with `kind=instruction`, retrievable on demand via `memory_search`.
+There is no dedicated instruction endpoint. Instructions are stored at
+global scope (user/workflow preferences) or project scope (repo-specific
+rules) using the same `memory_save` / `memory_update` / `memory_delete`
+tools as any other memory. The agent retrieves them via
+`memory_search(kind="instruction")` when it needs guidance — on-demand
+retrieval avoids polluting the context window.
 
 **Covers:** Epic 3 (Stories 3.1, 3.2, 3.3, 3.4)
 
@@ -150,7 +150,6 @@ graph TB
         ToolRouter["Tool Router"]
         ProjectRegistry["Project Registry"]
         MemoryService["Memory Service"]
-        InstructionService["Instruction Service"]
         Embedder["Embedder"]
         Config["Configuration"]
         HealthEndpoints["Health Endpoints"]
@@ -166,10 +165,8 @@ graph TB
     Auth --> ToolRouter
     ToolRouter --> ProjectRegistry
     ToolRouter --> MemoryService
-    ToolRouter --> InstructionService
     MemoryService --> Embedder
     MemoryService --> Postgres
-    InstructionService --> Postgres
     ProjectRegistry --> Postgres
     Embedder -->|openai provider| EmbeddingAPI
     HealthEndpoints --> Postgres
@@ -207,7 +204,7 @@ concerns (user resolution, validation, error formatting).
 **Responsibilities:**
 - Receive a parsed tool call with the authenticated `user_id` from Auth
 - Validate common parameters (scope, project_id against Project Registry)
-- Dispatch to Memory Service or Instruction Service based on tool name
+- Dispatch to Memory Service based on tool name
 - Catch service exceptions and format them as structured MCP errors with
   `error` and `hint` fields
 - Enforce the tool budget by being the single place where tools are registered
@@ -220,7 +217,7 @@ concerns (user resolution, validation, error formatting).
 - Does not generate embeddings
 - Does not know about the storage schema
 
-**Depends on:** Memory Service, Instruction Service, Project Registry
+**Depends on:** Memory Service, Project Registry
 
 ### Memory Service
 
@@ -246,27 +243,6 @@ delete.
 - Does not manage database migrations
 
 **Depends on:** Postgres (via AsyncPostgresStore), Embedding Client
-
-### Instruction Service
-
-**Purpose:** Compose layered instructions from global and project instruction
-memories.
-
-**Responsibilities:**
-- Query the store for memories with `kind=instruction` in both the global and
-  project namespaces
-- Order instructions within each layer by recency (or priority metadata if
-  present)
-- Concatenate global layer then project layer with clear section markers
-- Return the composed text (or empty string if no instructions exist)
-
-**Non-responsibilities:**
-- Does not store or delete instructions — that flows through Memory Service
-  via `memory_save` / `memory_update` / `memory_delete` with `kind=instruction`
-- Does not perform instruction compaction (deferred to v2.1)
-- Does not detect semantic conflicts between layers
-
-**Depends on:** Postgres (via AsyncPostgresStore)
 
 ### Embedder
 
@@ -505,41 +481,14 @@ sequenceDiagram
   dicts (ADR-0004)
 - Default limit value
 
-### Interaction 3: Retrieve composed instructions
+### Interaction 3: Retrieve instructions (via standard search)
 
-```mermaid
-sequenceDiagram
-    participant A as Agent
-    participant T as MCP Transport
-    participant R as Tool Router
-    participant U as Auth
-    participant I as Instruction Service
-    participant DB as Postgres
-
-    A->>T: instructions_get(project_id)
-    T->>R: dispatch(instructions_get, params)
-    R->>U: authenticate(request)
-    U-->>R: user_id
-    R->>I: get_instructions(project_id)
-    I->>DB: asearch(namespace=("global", "_"), filter={kind: "instruction"})
-    DB-->>I: global_instructions
-    I->>DB: asearch(namespace=("project", pid), filter={kind: "instruction"})
-    DB-->>I: project_instructions
-    I->>I: order each layer by recency
-    I->>I: compose: global section + project section with markers
-    I-->>R: composed_text
-    R-->>T: MCP result {instructions: text}
-    T-->>A: {instructions: text}
-```
-
-**Contracts to pin at Level 4:**
-- Section marker format (e.g., `## Global Instructions` /
-  `## Project Instructions`)
-- Ordering strategy: `updated_at` ascending (most recent last) vs.
-  `priority` metadata field
-- Empty-layer behaviour: omit the section entirely vs. include an empty
-  section marker
-- Return shape: single text string vs. structured layers
+Instructions are ordinary memories with `kind=instruction`. The agent
+retrieves them using `memory_search(project_id, query="instructions",
+kind="instruction")`. Both project-scoped and global instructions appear
+in the merged result list per the standard ranking rule (ADR-0010). No
+dedicated tool or Instruction Service component is needed — this is the
+same flow as Interaction 2 with a `kind` filter.
 
 ### Interaction 4: Embedding failure on save (error path)
 
@@ -602,7 +551,7 @@ details in ADR-0007, LLD to specify exact implementation.
 | C2. Update/delete | Tool Router, Memory Service, Embedder, Postgres | 0001 |
 | C3. Discover by meaning | Tool Router, Memory Service, Postgres | 0001, 0002, 0010 |
 | C4. Filter by structure | Tool Router, Memory Service, Postgres | 0001, 0004 |
-| C5. Layered instructions | Tool Router, Instruction Service, Postgres | 0001, 0002 |
+| C5. Instructions as memories | Tool Router, Memory Service, Postgres | 0001, 0002 |
 | C6. MCP tools | MCP Transport, Tool Router | 0006 |
 | C7. Auth + project identity | Auth, Project Registry, Tool Router | 0002, 0007, 0009 |
 | C8. Deploy as infra | Config, Health Endpoints, Migration Runner, MCP Transport, CLI | 0003, 0013 |
