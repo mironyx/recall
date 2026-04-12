@@ -224,12 +224,14 @@ content change" rule is exercised.
 
 ### E3.1 — `memory_update`
 - **HLD reference:** Memory Service; Tool Router.
+- **ADRs:** ADR-0001, ADR-0008.
 - **Rough tasks:** content-vs-metadata update path, content-change
   detection, integration tests proving metadata-only updates do not
   re-embed.
 
 ### E3.2 — `memory_delete`
 - **HLD reference:** Memory Service; Tool Router.
+- **ADRs:** ADR-0002.
 - **Rough tasks:** delete-by-id, idempotency, integration tests.
 
 ### E3.3 — Full structured-error vocabulary

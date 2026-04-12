@@ -214,13 +214,13 @@ The primary value delivery. Agents find relevant memories through semantic searc
 ### Story 2.3: Search filtering
 
 **As an** agent,
-**I want to** filter search results by kind, tags, scope, and/or user ID,
+**I want to** filter search results by kind, scope, and/or user ID,
 **so that** I can narrow results to the type of knowledge I need right now.
 
 **Acceptance Criteria:**
 
 - Given a search with `kind=decision`, when results are returned, then only memories with `kind=decision` are included.
-- Given a search with one or more tags, when results are returned, then only memories that have at least one of the specified tags are included.
+- ~~Given a search with one or more tags, when results are returned, then only memories that have at least one of the specified tags are included.~~ **(Deferred — tag filtering is not implemented in v2; see ADR-0004 amendment. Tags are stored but not filterable.)**
 - Given a search with `scope=project`, when results are returned, then only project-scoped memories are included (global memories are excluded).
 - Given a search with `scope=global`, when results are returned, then only global-scoped memories are included.
 - Given a search with a `user_id` filter, when results are returned, then only memories created by that user are included.
@@ -344,7 +344,7 @@ The following tools constitute the full MCP surface. This is the product interfa
 | # | Tool | Parameters | Returns | Purpose |
 |---|------|-----------|---------|---------|
 | 1 | `memory_save` | `scope`, `project_id?`, `kind`, `title`, `content`, `tags?`, `metadata?` | `{id}` | Persist a new memory. `scope` is `"project"` or `"global"`. `project_id` required when `scope="project"`, forbidden when `scope="global"`. |
-| 2 | `memory_search` | `project_id`, `query`, `kind?`, `tags?`, `scope?`, `user_id?`, `limit?` | `[{id, scope, kind, title, snippet, score}]` | Semantic search. Searches the given project **and** global by default; pass `scope` to restrict. Instructions are retrieved via `kind="instruction"`. |
+| 2 | `memory_search` | `project_id`, `query`, `kind?`, `scope?`, `user_id?`, `limit?` | `[{id, scope, kind, title, snippet, score}]` | Semantic search. Searches the given project **and** global by default; pass `scope` to restrict. Instructions are retrieved via `kind="instruction"`. |
 | 3 | `memory_get` | `id` | Full memory record | Fetch the complete record for a memory found via search. |
 | 4 | `memory_update` | `id`, `content?`, `tags?`, `metadata?` | `{id}` | Update an existing memory's content, tags, or metadata. |
 | 5 | `memory_delete` | `id` | `{ok}` | Permanently remove a memory. |
@@ -444,7 +444,7 @@ Safe multi-tenant use across machines. Users are authenticated per request via s
 **Acceptance Criteria:**
 
 - Given a memory saved with `project_id=X` from machine A, when a search is performed with `project_id=X` from machine B, then the memory appears in the results.
-- Given a memory saved with `scope=global` from machine A, when `instructions_get` or a global search is performed from machine B, then the memory is accessible.
+- Given a memory saved with `scope=global` from machine A, when `memory_search` or a global-scoped search is performed from machine B, then the memory is accessible.
 - Given two different users in the same project, when either user searches, then memories from both users are visible by default.
 
 ---
@@ -477,7 +477,7 @@ Safe multi-tenant use across machines. Users are authenticated per request via s
 **Acceptance Criteria:**
 
 - Given a project-scoped memory, when it is stored, then it is namespaced under `("project", "<project_id>")`.
-- Given a global-scoped memory, when it is stored, then it is namespaced under `("global", null)`.
+- Given a global-scoped memory, when it is stored, then it is namespaced under `("global", "_")` using the sentinel value from ADR-0002.
 - Given two different projects, when memories are stored in each, then a search in one project never returns memories from the other project (only from that project and global).
 - Given the namespace design, when reviewed, then `user_id` is a column on the memory record, not part of the namespace — all users in a project share the same namespace.
 
@@ -666,7 +666,7 @@ The last mile. Recall is useless if agents don't know when to store and retrieve
 
 ### Garbage collection
 
-- A garbage-collection job (CLI command, run on demand or on a schedule) reviews `scope=global` memories and can: (a) delete entries the agent never re-reads, (b) flag near-duplicates for merge. LLM-driven reclassification (demoting a global memory to project-specific) is deferred to v2.1.
+- **(Deferred to v2.1.)** A garbage-collection job (CLI command, run on demand or on a schedule) reviews `scope=global` memories and can: (a) delete entries the agent never re-reads, (b) flag near-duplicates for merge. LLM-driven reclassification (demoting a global memory to project-specific) is also deferred. In v2, operators curate manually via MCP tools or direct DB access.
 
 ---
 

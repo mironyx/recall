@@ -239,7 +239,8 @@ delete.
 **Non-responsibilities:**
 - Does not handle MCP protocol concerns
 - Does not resolve user identity
-- Does not own the instruction composition logic (that is Instruction Service)
+- Does not own instruction-specific logic — instructions are ordinary
+  memories with `kind=instruction` (see Interaction 3)
 - Does not manage database migrations
 
 **Depends on:** Postgres (via AsyncPostgresStore), Embedding Client
