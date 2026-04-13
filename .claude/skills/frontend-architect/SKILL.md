@@ -226,7 +226,7 @@ EOF
 RESULT=$(./scripts/gh-create-issue.sh \
   --title "<task title>" \
   --body "$BODY" \
-  --labels "area:frontend,kind:scaffold" \
+  --labels "area:frontend,kind:task" \
   --add-to-board)
 # RESULT is "created:<number>" or "exists:<number>"
 ```

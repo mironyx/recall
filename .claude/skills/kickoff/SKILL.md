@@ -273,7 +273,7 @@ epic-level until their turn, to avoid generating stale issues upfront.
    RESULT=$(./scripts/gh-create-issue.sh \
      --title "<task title>" \
      --body "$BODY" \
-     --labels "phase-0,area:<area>,kind:scaffold" \
+     --labels "phase-0,area:<area>,kind:task" \
      --add-to-board)
    ```
 4. Update epic bodies with their task checklists.

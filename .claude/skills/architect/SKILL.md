@@ -216,7 +216,7 @@ EOF
 RESULT=$(./scripts/gh-create-issue.sh \
   --title "<task title>" \
   --body "$BODY" \
-  --labels "<phase-label>,<area-label>,kind:scaffold" \
+  --labels "<phase-label>,<area-label>,kind:task" \
   --add-to-board)
 # RESULT is "created:<number>" or "exists:<number>"
 ```
@@ -257,7 +257,7 @@ Edit the existing design doc directly. Add a change log entry at the top noting 
 #### Enriched issue body
 
 Update the GitHub issue (epic or task) with:
-
+t
 - **Fix approach** — specific files and functions to change
 - **Affected files** — paths with line numbers where relevant
 - **Acceptance criteria** — concrete, testable
