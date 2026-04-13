@@ -225,9 +225,9 @@ epic-level until their turn, to avoid generating stale issues upfront.
 
 1. Propose the list of epics and Phase 0 tasks to the user with a summary
    table. **Wait for confirmation** before creating anything.
-2. For each epic (all phases), create an epic issue:
+2. For each epic (all phases), create an epic issue using the shared script:
    ```bash
-   gh issue create --title "Epic: <name>" --label epic --body "$(cat <<'EOF'
+   BODY=$(cat <<'EOF'
    ## Scope
    ...
 
@@ -235,7 +235,7 @@ epic-level until their turn, to avoid generating stale issues upfront.
    ...
 
    ## HLD reference
-   docs/design/v1-design.md#<anchor>
+   docs/design/<design-doc>.md#<anchor>
 
    ## Related ADRs
    - ADR-NNNN ...
@@ -243,14 +243,40 @@ epic-level until their turn, to avoid generating stale issues upfront.
    ## Tasks
    - [ ] (to be added)
    EOF
-   )"
+   )
+   RESULT=$(./scripts/gh-create-issue.sh \
+     --title "Epic E<N>.<M>: <name>" \
+     --body "$BODY" \
+     --labels "epic,phase-<N>,area:<area>" \
+     --add-to-board)
+   # RESULT is "created:<number>" or "exists:<number>"
    ```
-3. Add each epic to the board: `./scripts/gh-project-status.sh add <number> todo`
-4. For Phase 0 epics only, create task issues and link them back to their
-   parent epic. Follow the task-body format from `/architect` (Parent epic,
-   Design reference, Acceptance criteria, BDD specs placeholder).
-5. Add each task to the board.
-6. Update epic bodies with their task checklists.
+3. For Phase 0 epics only, create task issues using the shared script:
+   ```bash
+   BODY=$(cat <<'EOF'
+   ## Parent epic
+   #<epic-number>
+
+   ## Design reference
+   docs/design/lld-<epic-slug>.md
+
+   ## Acceptance criteria
+   - [ ] ...
+
+   ## BDD specs
+   ```
+   class TestContext:
+       def test_behaviour_given_when_then(self) -> None: ...
+   ```
+   EOF
+   )
+   RESULT=$(./scripts/gh-create-issue.sh \
+     --title "<task title>" \
+     --body "$BODY" \
+     --labels "phase-0,area:<area>,kind:scaffold" \
+     --add-to-board)
+   ```
+4. Update epic bodies with their task checklists.
 
 ### Step 8: Update CLAUDE.md
 
@@ -279,7 +305,7 @@ Summarise to the user:
 - Epics created (all phases) and task issues created (Phase 0 only)
 - Board state
 - Drift scan verdicts (both runs)
-- Suggested next step: run `/architect epic <N>` on the first Phase 0 epic
+- Suggested next step: run `/architect --epics E0` to produce LLDs for Phase 0
 
 **Stop here.** Do not proceed to `/architect` or `/feature` automatically.
 Project bootstrap is a deliberate, gated process — the user drives the
