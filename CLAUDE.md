@@ -1,14 +1,19 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Behavioral guidelines
 
-# Recall — Focused MCP Memory Server
+- **Think before coding.** State assumptions. If uncertain, ask. If multiple interpretations exist, present them.
+- **Simplicity first.** Minimum code that solves the problem. No speculative features, abstractions, or error handling for impossible scenarios.
+- **Surgical changes.** Touch only what you must. Match existing style. Don't "improve" adjacent code. Every changed line should trace to the request.
+- **Goal-driven execution.** Transform tasks into verifiable goals. Write the failing test first, then make it pass.
 
-A small, focused MCP server that gives coding agents persistent memory across sessions, machines, and projects. Successor to LangMem v1, deliberately rebuilt to be smaller, simpler, and agent-first.
+## Recall — Focused MCP Memory Server
 
-**Current phase:** Phase 0 — Foundation (scaffolding, CI, container, real-Postgres test fixture). See [docs/plans/2026-04-12-v2-implementation-plan.md](docs/plans/2026-04-12-v2-implementation-plan.md) for the full phasing and [docs/design/v2-design.md](docs/design/v2-design.md) for the HLD.
+A small, focused MCP server that gives coding agents persistent memory across sessions, machines, and projects.
 
-**The full product spec lives in [docs/requirements/v2-requirements.md](docs/requirements/v2-requirements.md). Read it before starting any non-trivial change.**
+**Current phase:** Phase 0 — Foundation. See [implementation plan](docs/plans/2026-04-12-v2-implementation-plan.md) and [HLD](docs/design/v2-design.md).
+
+**Read [REQUIREMENTS.md](docs/requirements/v2-requirements.md) before starting any non-trivial change.**
 
 ## Tech stack
 
@@ -17,115 +22,72 @@ A small, focused MCP server that gives coding agents persistent memory across se
 - **Lint / format:** `ruff` (lint + format in one tool)
 - **Type checker:** `mypy --strict`
 - **Tests:** `pytest` + `pytest-asyncio`; integration tests use `testcontainers` against real Postgres
-- **Storage:** Postgres + `pgvector`, accessed via LangGraph `AsyncPostgresStore`
-- **Embeddings:** Dual provider — sentence-transformers (in-process) or OpenAI-compatible HTTP (ADR-0008)
+- **Storage:** Postgres + `pgvector`, accessed via `AsyncPostgresStore`
+- **Embeddings:** sentence-transformers (in-process) or OpenAI-compatible HTTP (ADR-0008)
 - **MCP transport:** Streamable HTTP (no SSE shim)
 - **Deployment:** single container
 
-## Design principles (from REQUIREMENTS.md)
+## Design principles
 
-1. **Few tools, broad tools.** ≤ 6 MCP tools total (5 in v2). Tool design is prompt design — the agent is the user.
-2. **Two scopes: project and global.** A memory is bound to a `project_id` or marked `scope=global`. Storage namespace is `(scope, project_id)` (ADR-0002).
-3. **Categories are data, not classes.** A memory has a `kind` field; adding a kind is a config change, not a new class.
-4. **One server, one transport, one entrypoint.** No parallel implementations.
-5. **Boring storage.** No bespoke abstractions on top of `AsyncPostgresStore` until proven necessary.
+1. **Few tools, broad tools.** ≤ 6 MCP tools total. Tool design is prompt design.
+2. **Two scopes: project and global.** Namespace is `(scope, project_id)` (ADR-0002).
+3. **Categories are data, not classes.** `kind` field; adding a kind is config, not code.
+4. **One server, one transport, one entrypoint.**
+5. **Boring storage.** No bespoke abstractions on top of `AsyncPostgresStore`.
 
-## Engineering practice (carried over from feature-comprehension-score)
+## Engineering practice
 
-This repo follows the same delivery framework as our sibling project. The framework — not the domain — is what's being reused.
-
-- **TDD-first.** Write the failing test before the implementation. Integration tests hit a real Postgres (testcontainers); never mock the store.
-- **Issue-driven work.** No work without a GitHub issue. Epics group tasks; tasks live as separate issues. See the `/feature` skill in `.claude/skills/`.
-- **Specialised role agents.** Tester → Developer → Reviewer flow via the agents in `.claude/agents/`.
-- **ADRs for non-obvious decisions.** Use the `/create-adr` skill. Store in `docs/adr/`.
-- **LLDs per task.** `docs/design/lld-<epic-slug>-<task-slug>.md`. Use the `/lld` skill.
-- **Small PRs.** One logical change per PR. Don't bundle refactors with features.
-- **Commit messages explain *why*.** The diff already shows what.
+- **TDD-first.** Failing test before implementation. Integration tests hit real Postgres; never mock the store.
+- **Issue-driven.** No work without a GitHub issue. Epics group tasks.
+- **ADRs for non-obvious decisions.** Stored in [docs/adr/](docs/adr/).
+- **LLDs per task.** `docs/design/lld-<epic-slug>-<task-slug>.md`.
+- **Small PRs.** One logical change per PR.
 
 ## Common commands
 
 ```bash
-# Install / sync deps (creates .venv)
-uv sync --extra dev
-
-# Run the server locally
-uv run recall serve
-
-# Lint & format
-uv run ruff check .
-uv run ruff format .
-
-# Type-check
-uv run mypy
-
-# Tests
-uv run pytest                          # everything
-uv run pytest -m "not integration"     # unit only
-uv run pytest -m integration           # integration only
-
-# Database migrations
-uv run recall db migrate
+uv sync --extra dev              # Install / sync deps
+uv run recall serve              # Run server locally
+uv run ruff check .              # Lint
+uv run ruff format .             # Format
+uv run mypy                      # Type-check
+uv run pytest                    # All tests
+uv run pytest -m "not integration"  # Unit only
+uv run pytest -m integration     # Integration only
+uv run recall db migrate         # Database migrations
 ```
 
 ## Repository layout
 
 ```
-src/recall/           # Application code (package)
-src/recall/migrations/ # Numbered SQL migration files (ADR-0013)
-tests/                # pytest tests; integration tests marked with @pytest.mark.integration
-scripts/              # Operational + Claude-Code helper scripts
-docs/                 # ADRs, design, plans, requirements, references
-.claude/              # Skills, agents, commands, hooks, settings
+src/recall/            # Application code
+src/recall/migrations/ # SQL migration files (ADR-0013)
+tests/                 # pytest tests; integration marked @pytest.mark.integration
+docs/                  # ADRs, design, plans, requirements, references
+scripts/               # Operational + helper scripts
+.claude/               # Skills, agents, commands, hooks, settings
 ```
 
 ## Things to never do
 
-- **Never mock the database in tests.** Integration tests must hit a real Postgres via testcontainers. The whole point is catching schema/migration drift.
-- **Never bypass `ruff` / `mypy` / pre-commit hooks** with `--no-verify`. If a check fails, fix the underlying issue.
-- **Never add a new MCP tool without updating the tool reference table in v2-requirements.md** and getting agreement that the tool budget (≤ 6) is still respected.
-- **Never store project-specific state in `scope=global` memories.** The scope decision rule: "if this fact would still be true and useful in a brand-new empty repo tomorrow, save it as global; otherwise project."
+- **Never mock the database in tests.** Real Postgres via testcontainers only.
+- **Never bypass `ruff` / `mypy` / pre-commit hooks** with `--no-verify`.
+- **Never add a new MCP tool** without updating the tool table in requirements and respecting the ≤ 6 budget.
+- **Never store project-specific state as `scope=global`.**
 - **Never widen the storage namespace** beyond `(scope, project_id)` without an ADR.
 
 ## Local references
 
-Upstream docs and source for the two libraries we build on are distilled locally — read these before touching storage or memory-tool wiring, and prefer them over re-fetching upstream:
+Read these before touching storage or memory-tool wiring:
 
-- [docs/reference/langmem-notes.md](docs/reference/langmem-notes.md) — LangMem tools, namespace templating, store wiring.
-- [docs/reference/asyncpostgresstore-notes.md](docs/reference/asyncpostgresstore-notes.md) — schema DDL, API signatures, filter operators, the two gotchas (top-level-only keys, lexicographic numeric comparison), TTL, migrations.
+- [langmem-notes.md](docs/reference/langmem-notes.md) — LangMem tools, namespace templating, store wiring.
+- [asyncpostgresstore-notes.md](docs/reference/asyncpostgresstore-notes.md) — schema DDL, API, filter operators, gotchas.
+- [docs/adr/](docs/adr/) — All architectural decisions (ADR-0001 through ADR-0013).
 
-Key architectural decisions live in [docs/adr/](docs/adr/) — 0001 (flat value schema), 0002 (namespace shape), 0003 (no TTL in v1), 0004 (filter limitations & ISO-string dates), 0005 (project bootstrap pipeline), 0006 (Streamable HTTP sole transport), 0007 (shared bearer-token auth, OIDC/mTLS deferred), 0008 (embeddings provider abstraction), 0009 (project registry table), 0010 (search ranking: union with project boost), 0011 (observability: structlog + OTEL auto-instrumentation only), 0012 (test strategy: real Postgres via testcontainers, no mocks), 0013 (in-app DDL migrations, no Alembic).
+## Process
 
-## Engineering Process
-
-Pipeline: `requirements → /kickoff → /architect → /feature → /feature-end → /retro`.
-For the full lifecycle, stages, human gates, artefact map, skills index, and ADR index, see [docs/process/engineering-process.md](docs/process/engineering-process.md). Rationale for the bootstrap shape lives in [ADR-0005](docs/adr/0005-project-bootstrap-pipeline.md).
-
-### Custom skills
-
-- `/kickoff` — Bootstrap a new project (or major version) from `REQUIREMENTS.md`. Produces the HLD (Levels 1–3), load-bearing ADRs, and the implementation plan, with human gates after each. Use once per project/version before `/architect`. See [ADR-0005](docs/adr/0005-project-bootstrap-pipeline.md).
-- `/architect` — Read a plan and produce all design artefacts in one pass (ADRs, LLDs, design doc updates, enriched issue bodies). Stops for human review before implementation.
-- `/feature` — Autonomous implementation cycle: picks top Todo item (or specified issue), creates branch, TDD implementation, `/diag`, commit, PR, `/pr-review-v2`. Stops after review for human approval.
-- `/feature-end` — Post-review wrap-up: writes session log, commits remaining changes, merges PR (with approval), switches to parent branch, cleans up local branch, updates project board.
-- `/drift-scan`, `/retro` — Periodic maintenance sweeps across requirements, design and code.
-
-## Custom Skills
-
-- `/discovery` — Explore a problem space from a freeform idea using adapted Lean Inception. Produces a structured discovery document (vision, boundaries, personas, journeys, features, MVP sequencing). Use before `/requirements` when starting a new project or major version.
-- `/requirements` — Transform discovery output or a freeform brief into a structured requirements document with epics, prioritised user stories, and testable acceptance criteria. Use after `/discovery` (or standalone) and before `/kickoff`.
-- `/kickoff` — Bootstrap a new project from a requirements document. Produces the HLD (Levels 1–3), load-bearing ADRs, and the implementation plan, with human gates after each. Use once per project/version before `/architect`.
-- `/architect` — Read a plan and produce all design artefacts in one pass (ADRs, LLDs, design doc updates, enriched issue bodies). Stops for human review before implementation.
-- `/feature` — Autonomous implementation cycle: picks top Todo item (or specified issue), creates branch, TDD implementation, `/diag`, commit, PR, `/pr-review-v2`. Stops after review for human approval.
-- `/feature-end` — Post-review wrap-up: writes session log, commits remaining changes, merges PR (with approval), switches to parent branch, cleans up.
-- `/feature-team` — Parallel implementation using Claude Code agent teams (CLI only). Each teammate autonomously implements one issue in its own worktree.
-- `/create-adr` — Create Architecture Decision Records for significant technical decisions.
-- `/create-plan` — Create detailed implementation plans for features or work phases.
-- `/lld` — Generate Low-Level Design documents for a phase or section. Produces LLDs with implementation detail, file paths, types, and task breakdowns.
-- `/lld-sync` — Sync the LLD back to the implementation after a feature is complete. Compares spec vs what was built, updates the LLD in-place.
-- `/diag` — Batch check diagnostics-exporter output for changed files. Detects, fixes, and verifies resolution.
-- `/pr-review-v2` — Review a PR for bugs, CLAUDE.md compliance, design contract adherence, and best practices. Usage: `/pr-review-v2 <pr-number>` or `/pr-review-v2` (local diff).
-- `/drift-scan` — Run garbage collection scan for drift between requirements, design artefacts, and implemented code.
-- `/retro` — Run a process retrospective: review sessions, assess process health, produce improvement actions.
+Pipeline: `requirements → /kickoff → /architect → /feature → /feature-end → /retro`. Full details in [engineering-process.md](docs/process/engineering-process.md).
 
 ## Task tracking
 
-GitHub Issues are the source of truth. The board (GitHub Project #3) is set up with epics for all phases and task issues for Phase 0. Labels: `epic`, `phase-0` through `phase-5`, `area:*`, `kind:scaffold`. Use `./scripts/gh-project-status.sh` to manage board state.
+GitHub Issues + Project #3. Labels: `epic`, `phase-0`–`phase-5`, `area:*`, `kind:task`. Manage via `./scripts/gh-project-status.sh`.
