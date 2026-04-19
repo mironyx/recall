@@ -118,20 +118,25 @@ Execute these steps sequentially.
 
 **Parse arguments.** Scan `$ARGUMENTS` for:
 
-1. **A file path** — if present, use it as the plan file. Otherwise find the most recent `docs/plans/*.md` file by modification date.
-2. **`--epics` flag** — if present, extract the comma-separated list of epic identifiers. Parse each:
+1. **A file path** — if present, use it as the input file. Otherwise find the most recent `docs/plans/*.md` file by modification date.
+2. **Input detection.** The input may be either a plan file (`docs/plans/`) or a requirements document (`docs/requirements/`). If it is a requirements document, treat each epic and its stories as the work items to design — extract epics, stories, priorities, and acceptance criteria the same way you would from a plan. The `--epics` filter works identically (filter by epic number). Skip `/kickoff`-specific concerns (HLD creation, ADR discovery, phase sequencing) — the requirements doc is the authority for scope.
+3. **`--epics` flag** — if present, extract the comma-separated list of epic identifiers. Parse each:
    - Phase-level (e.g. `E2`) — expand to all epics matching `E2.*` in the plan.
    - Individual (e.g. `E2.1`) — match that exact epic.
    - Store the resolved set of epic identifiers (e.g. `{E2.1, E2.2, E2.3, E3.1}`).
-3. If `--epics` is not provided, all epics in the plan are in scope.
+4. If `--epics` is not provided, all epics in the plan are in scope.
 
-**Read the plan file fully.** Extract the list of epics with their priorities, dependencies, and design needs. **Filter to only the in-scope epics.** Report which epics are in scope and which are being skipped.
+**Read the input file fully.** Extract the list of epics with their priorities, dependencies, and design needs. **Filter to only the in-scope epics.** Report which epics are in scope and which are being skipped.
 
 **Before creating anything**, check what already exists:
 
 1. **Issues:** Run `gh issue list --state open --limit 100` to see all open issues. Do not create issues that already exist.
 2. **Design docs:** Check `docs/design/`, `docs/adr/`, and `docs/requirements/` for existing coverage of each item.
 3. **Source of truth rule:** Design detail must live in version-controlled repo docs (`docs/design/`, `docs/adr/`, `docs/requirements/`), not only in GitHub issue bodies. Issue bodies should reference repo docs, not replace them. If an item has detail only in an issue body, it needs a repo doc artefact (LLD section, design doc update, or requirements update).
+4. **Issue structure check:** For each existing issue that this run will enrich or create tasks for, run `gh issue view <number> --json labels,title` and check:
+   - If the issue contains **multiple stories** (i.e. the decomposition assessment in Step 2b will produce ≥ 2 task issues), the issue must carry the `epic` label. If it does not, flag this in the Step 2 summary table under a "Label fix needed" column and correct it before producing any artefacts — use `gh issue edit <number> --add-label "epic" --remove-label "kind:task"` and update the title to `epic: <name>` format.
+   - If the issue is a single-task item, it should carry `kind:task` and have a `## Parent epic` section. If no parent epic exists, flag it and ask the user whether to create one or proceed without.
+   - **Never enrich a multi-story issue without first fixing its label.** Enriching a `kind:task` issue with story tables creates the exact structural inconsistency this check is designed to prevent.
 
 ### Step 2: Analyse and present overview
 
@@ -159,6 +164,19 @@ Include a preliminary execution waves proposal below the table:
 | 1 | #1, #2 | — | Parallelisable |
 | 2 | #3 | Wave 1 (#1) | |
 ```
+
+Include a Mermaid dependency graph below the waves table:
+
+```mermaid
+graph LR
+  A["#N · Task title\n(layer)"]
+  B["#M · Task title\n(layer)"]
+  C["#P · Task title\n(layer)"]
+  A --> C
+  B --> C
+```
+
+Nodes use the format `#<issue> · <short title>\n(<layer>)`. Dashed arrows (`-.->` with label) indicate soft coupling such as a shared migration. Nodes that have no incoming arrows are parallelisable from the start. Add a plain-English summary below the diagram stating which tasks can start immediately in parallel and which must be sequential.
 
 **Wait for user confirmation** before producing artefacts. The user may re-prioritise, skip items, redirect artefact types, adjust wave assignments, or reject a proposed split.
 
@@ -221,7 +239,9 @@ RESULT=$(./scripts/gh-create-issue.sh \
 # RESULT is "created:<number>" or "exists:<number>"
 ```
 
-Update the epic body with the task checklist linking all created issues.
+Update the epic body with:
+1. A task checklist linking all created issues (`- [ ] #N — <title>`).
+2. A `## Dependency graph` section containing the finalised Mermaid diagram (with real issue numbers substituted) and the plain-English parallelism summary.
 
 #### ADR (cross-cutting decision)
 
@@ -282,7 +302,11 @@ git commit -m "docs: design for #<issue> — <summary>"
 
 One commit per item for granular review. Do not batch.
 
-### Step 6: Report
+### Step 6: Write session log
+
+Follow `.claude/skills/shared/session-log.md`. Use `<skill>=architect` and a `<slug>` identifying the epics or plan sections processed (e.g. `architect-e11-e17`).
+
+### Step 7: Report
 
 After all in-scope epics are processed, summarise:
 

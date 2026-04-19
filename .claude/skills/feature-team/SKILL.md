@@ -16,9 +16,11 @@ Not supported in VS Code.
 **Usage:**
 - `/feature-team 101 102 103` — implement three specific task issues in parallel
 - `/feature-team -n 3` — implement the top 3 Todo task items from the project board
-- `/feature-team epic 45` — implement all tasks from epic #45 in parallel
+- `/feature-team epic 45` — implement all tasks from epic #45, wave-by-wave when the epic body declares dependencies
 
 For a single issue, use `/feature` instead. Epic issues (label `epic`) cannot be implemented directly — pass task issues or use `epic <N>` mode.
+
+**Wave handling:** When given an epic, the lead reads the epic body for an `## Execution Order` table or a `## Dependency graph` Mermaid diagram and spawns teammates wave-by-wave. Without either, all tasks spawn in parallel. See Step 1 for parsing rules.
 
 ## Lead Process
 
@@ -31,7 +33,19 @@ If `epic <N>` is given:
 2. Verify it has the `epic` label. If not, stop: "Issue #N is not an epic."
 3. Parse the task checklist from the body. Extract all unchecked task issue numbers.
 4. If no unchecked tasks, stop: "Epic #N has no remaining tasks."
-5. Check for an **Execution Order** section in the epic body. If present, parse the execution waves table and spawn teammates wave-by-wave (all tasks in Wave 1 first; when Wave 1 completes, spawn Wave 2, etc.). If no execution order section exists, spawn all tasks in parallel (legacy behaviour).
+5. Determine execution waves from the epic body, in this order of precedence:
+   1. **`## Execution Order` section with a waves table** — use as authored (explicit `Wave | Issues | Blocked by` rows).
+   2. **`## Dependency graph` section with a Mermaid diagram** — derive waves by topological sort: nodes with no incoming solid edges form Wave 1; once Wave 1 is complete, nodes whose remaining incoming edges all come from Wave 1 form Wave 2; continue until all nodes are placed. Treat dashed/soft-coupling edges (`-.->`) and external nodes (parenthesised `S63(["..."])`-style stadium nodes) as advisory — do not block on them. Any task whose only blockers are external/advisory belongs in Wave 1.
+   3. **Neither present** — spawn all tasks in parallel (legacy behaviour). Warn the user that the epic has no dependency information and races may occur on shared files.
+
+   Spawn teammates wave-by-wave: all tasks in Wave 1 in parallel; when every Wave 1 PR is merged (not just opened), spawn Wave 2; and so on. Tasks marked as deferred / externally blocked are not spawned at all — list them in the final report instead.
+
+   Before spawning each wave, echo the parsed wave plan back to the user (one line per wave with issue numbers) so the derivation is auditable.
+
+6. Move the epic itself to In Progress on the project board:
+   ```bash
+   bash scripts/gh-project-status.sh add <epic-number> "in progress"
+   ```
 
 If `-n N` is given:
 ```bash
@@ -69,6 +83,10 @@ Create one task per issue:
 - State: pending
 
 ### Step 4: Spawn teammates
+
+**Pre-flight:** `TeamCreate` is a deferred tool — its schema is not loaded at session start.
+Fetch it before proceeding or the call will fail with `InputValidationError`:
+`ToolSearch(query="select:TeamCreate")`
 
 **Two-step pattern — always follow this exact sequence:**
 
@@ -155,6 +173,19 @@ When all teammates have reported their PR URLs, summarise:
 When the user runs `/feature-end <N>` in the lead pane, forward it to the relevant teammate
 via SendMessage: "Please run `/feature-end <N>`."
 
+**Human review gate (critical):** The lead MUST NOT send `/feature-end` to any teammate
+autonomously. Every PR requires human review before merge. The flow is:
+
+1. Teammate reports PR → lead summarises to user
+2. User reviews the PR (outside the lead session)
+3. User says `/feature-end <N>` or equivalent → lead forwards to teammate
+
+**Wave progression after merge:** Once all PRs in a wave have been merged via `/feature-end`,
+the lead **immediately shuts down that wave's teammates** (parallel `SendMessage` with
+`shutdown_request`) and then auto-spawns the next wave's teammates — no further user input
+needed. The human gate is per-PR (review before merge), not per-wave (no extra approval to
+start the next wave). Do not leave completed-wave teammates running while later waves execute.
+
 ### Step 7: Final summary
 
 Wait for all teammates to send their "Feature-end complete for #N" messages.
@@ -163,9 +194,45 @@ When all are received, summarise:
 - Each issue → PR merged → board/issue closed
 - Any notes from individual feature-ends (rebases, review fixes, etc.)
 
-**Only now** is the team fully done. Do not move board items — `/feature-end` handles that.
+**Only now** is the team fully done. Individual task board items are handled by `/feature-end`.
 
-**Immediately after summarising**, send a shutdown_request to every teammate:
+**If running in `epic` mode**, close the epic itself now that all tasks are shipped:
+```bash
+bash scripts/gh-project-status.sh <epic-number> done
+gh issue close <epic-number> --comment "All tasks shipped. Closing epic."
+```
+
+### Step 8: Write the team session log
+
+Write this log only **after all waves are complete** — not after each wave. It captures the
+lead's view across the entire run.
+
+Per-teammate `/feature-end` logs capture per-issue work, but they miss the **lead's view** —
+orchestration decisions, cross-cutting changes, coordination events, and process observations
+that span multiple teammates. Write a team session log to capture this *before* shutting
+the final wave's teammates down, while context is still fresh.
+
+Path: `docs/sessions/YYYY-MM-DD-team-<issues>-<short-slug>.md` (e.g.
+`2026-04-16-team-223-224-225-comprehension-depth.md`).
+
+Required sections:
+
+- **Issues shipped** — table of issue → story → PR → branch → merged-at.
+- **Cross-cutting decisions** — anything that affected multiple teammates (e.g. mid-cycle
+  scope changes, framing revisions, shared design choices). Per-issue logs cannot capture
+  these — only the team log can.
+- **Coordination events** — spawn pattern, blockers relayed, rebases, conflicts, CI flakes,
+  protocol deviations, anything where lead intervention shaped the run.
+- **What worked / what didn't** — short, candid. Decay fast otherwise.
+- **Process notes for `/retro`** — explicit hand-off so that the next retrospective can pick
+  up these observations without re-deriving them from git.
+
+Keep it concise (one screen typically). The goal is to preserve orchestration context that
+would otherwise have to be reconstructed from git, message logs, and PR threads.
+
+### Step 9: Shutdown teammates
+
+**Immediately after writing the team log**, send a shutdown_request to every teammate:
 ```
 SendMessage(to="teammate-<N>", message={"type": "shutdown_request", "reason": "Feature-end complete."})
 ```

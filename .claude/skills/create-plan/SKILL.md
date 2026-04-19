@@ -16,20 +16,30 @@ cleanly to `/architect epic <n>`.
 - `/create-plan docs/adr/NNNN-<title>.md` — plan from an ADR.
 - `/create-plan <issue-number>` — plan from an existing GitHub issue.
 
+**Input detection:** The input may be a plan file, a requirements doc, an ADR, or
+a GitHub issue. When the input is a requirements document, treat it as the
+authority for scope — do not add features beyond what the requirements specify.
+When the input is an ADR or issue, cross-reference the relevant requirements doc
+to confirm scope alignment.
+
 ## Process
 
 1. **Read the input** fully. Also read everything it references: ADRs in
    `docs/adr/`, the root `REQUIREMENTS.md`, existing LLDs in
    `docs/design/`, and relevant source files.
-2. **Check existing state**: `gh issue list --state open --limit 50` and a scan
+2. **Detect input type and scope authority**: identify whether the input is a
+   requirements doc (authoritative for scope), an ADR, or an issue. If not a
+   requirements doc, locate the relevant requirements doc and use it to bound
+   scope.
+3. **Check existing state**: `gh issue list --state open --limit 50` and a scan
    of `docs/design/` to avoid duplicating epics, tasks, or LLDs that already
    exist. Note anything the new work supersedes.
-3. **Clarify before writing**: present your understanding and any open questions
+4. **Clarify before writing**: present your understanding and any open questions
    in chat. Do not write the plan with open questions — resolve them first.
-4. **Propose the epic + task breakdown** (see decomposition rules below) and get
+5. **Propose the epic + task breakdown** (see decomposition rules below) and get
    approval before writing the full plan.
-5. **Write the plan** to `docs/plans/YYYY-MM-DD-<short-name>.md`.
-6. **Report next step**: `/architect epic <n>` once the epic issue is created,
+6. **Write the plan** to `docs/plans/YYYY-MM-DD-<short-name>.md`.
+7. **Report next step**: `/architect epic <n>` once the epic issue is created,
    or `/architect <plan-path>` if no epic issue yet.
 
 ## Decomposition Rules
@@ -41,6 +51,8 @@ cleanly to `/architect epic <n>`.
   seam (independently testable, non-overlapping files).
 - Each task must name its design artefact need: new LLD, update to existing
   LLD, new ADR, or "covered by existing doc — BDD specs only".
+- L1–L5 labels describe design level, not hierarchy — tasks are labelled
+  `kind:task`.
 
 ## Plan Template
 
