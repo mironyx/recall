@@ -36,8 +36,8 @@ def git_root() -> pathlib.Path:
 def derive_project_key(root: pathlib.Path) -> str:
     """Convert a git root path to a Claude project key.
 
-    Windows: C:\\projects\\feature-comprehension-score -> c--projects-feature-comprehension-score
-    WSL:     /home/user/projects/feature-comprehension-score -> -home-user-projects-feature-comprehension-score
+    Windows: C:\\projects\\recall -> c--projects-recall
+    WSL:     /home/user/projects/recall -> -home-user-projects-recall
     """
     path_str = str(root).lower()
     # On Windows, "c:\projects\foo" must become "c--projects-foo".
@@ -71,6 +71,30 @@ def find_session_jsonl_via_proc(claude_dir: pathlib.Path) -> pathlib.Path | None
     return None
 
 
+def _first_user_message_text(jsonl_path: pathlib.Path) -> str:
+    """Return the concatenated text of the first user message in a JSONL, or ''."""
+    try:
+        with open(jsonl_path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("type") != "user":
+                    continue
+                content = entry.get("message", {}).get("content", "")
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
+                    return " ".join(
+                        c.get("text", "") for c in content if isinstance(c, dict)
+                    )
+                return ""
+    except OSError:
+        pass
+    return ""
+
+
 def find_session_jsonl(claude_dir: pathlib.Path, issue_hint: str | None = None) -> pathlib.Path | None:
     all_jsonl = sorted(claude_dir.glob("*.jsonl"), key=os.path.getmtime, reverse=True)
     if not all_jsonl:
@@ -78,19 +102,18 @@ def find_session_jsonl(claude_dir: pathlib.Path, issue_hint: str | None = None) 
     if not issue_hint or len(all_jsonl) == 1:
         return all_jsonl[0]
 
-    # Parallel mode: each teammate's spawn prompt contains "issue #N" and "FCS-N" in the
-    # first user message. Search recently-modified JSONL files for our issue number so
-    # that simultaneous agent-team starts don't collide on the same file.
-    search_terms = [f"issue #{issue_hint}", f"FCS-{issue_hint}"]
+    # Parallel mode: each teammate's spawn prompt contains "issue #N" and "RECALL-N" as the
+    # first user message. The lead's JSONL also contains these strings (in Agent tool-call
+    # payloads later in the file), so we must only match against the FIRST user message —
+    # which for teammates is the spawn prompt, and for the lead is the human's input.
+    search_terms = [f"issue #{issue_hint}", f"RECALL-{issue_hint}"]
     cutoff = time.time() - 600  # only consider sessions started in the last 10 minutes
     recent = [f for f in all_jsonl if os.path.getmtime(f) > cutoff]
 
     for jsonl in recent:
-        try:
-            if any(t in jsonl.read_text(encoding="utf-8", errors="replace") for t in search_terms):
-                return jsonl
-        except OSError:
-            continue
+        first_msg = _first_user_message_text(jsonl)
+        if any(t in first_msg for t in search_terms):
+            return jsonl
 
     return all_jsonl[0]  # fall back to newest
 
@@ -141,7 +164,7 @@ def main() -> None:
     parser.add_argument("--cont", action="store_true", help="Continuation session — appends (cont) to title")
     args = parser.parse_args()
 
-    feature_id = f"FCS-{args.issue}"
+    feature_id = f"RECALL-{args.issue}"
     root = git_root()
     project_key = derive_project_key(root)
 
@@ -161,10 +184,10 @@ def main() -> None:
     write_custom_title(jsonl_path, session_id, title)
 
     # 2. Update Prometheus textfile
-    # FCS_FEATURE_PROM_DIR overrides the default path — set this in WSL to point to
+    # RECALL_FEATURE_PROM_DIR overrides the default path — set this in WSL to point to
     # the Windows-accessible folder that node exporter reads from, e.g.:
-    # export FCS_FEATURE_PROM_DIR=/mnt/c/projects/feature-comprehension-score/monitoring/textfile_collector
-    textfile_dir = pathlib.Path(os.environ.get("FCS_FEATURE_PROM_DIR") or root / "monitoring" / "textfile_collector")
+    # export RECALL_FEATURE_PROM_DIR=/mnt/c/projects/recall/monitoring/textfile_collector
+    textfile_dir = pathlib.Path(os.environ.get("RECALL_FEATURE_PROM_DIR") or root / "monitoring" / "textfile_collector")
     textfile_dir.mkdir(parents=True, exist_ok=True)
     update_prom_file(textfile_dir / "session_feature.prom", session_id, feature_id)
 

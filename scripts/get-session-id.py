@@ -13,7 +13,7 @@ import os
 import pathlib
 import sys
 
-PROJECT_KEY = "c--projects-feature-comprehension-score"
+PROJECT_KEY = "c--projects-recall"
 claude_dir = pathlib.Path.home() / ".claude" / "projects" / PROJECT_KEY
 jsonl_files = sorted(claude_dir.glob("*.jsonl"), key=os.path.getmtime, reverse=True)
 

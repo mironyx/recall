@@ -97,7 +97,7 @@ Evaluate each open issue:
 
 Backlog grooming is not purely mechanical. Spend real effort here:
 
-- **Re-read the FCS article** (`local-docs/feature-comprehension-score-article.md`) and ask: what would make this product more *convincing* as a dogfooding example? What would a skeptical reader want to see that we haven't built yet?
+- **Re-read the project requirements** (`docs/requirements/v2-requirements.md`) and ask: what would make this product more *convincing*? What would a skeptical user want to see that we haven't built yet?
 - **Think about the user journey end-to-end** — where are the rough edges? Onboarding? Empty states? Error recovery? Mobile? What would make a first-time user say "this is polished"?
 - **Consider adjacent capabilities** — what natural extensions of current features would deepen the product without bloating scope?
 - **Light web research** (use WebSearch sparingly, 1-3 queries max): what are comparable products doing that we could adapt? What does "state of the art" look like for code-comprehension / engineering-metrics tools in the current year? Do not blindly copy — use for inspiration and flag ideas explicitly as "external inspiration".

@@ -56,5 +56,5 @@ Include relevant constraints, forces, and prior decisions that influence this on
 - The **Decision** and **Consequences** sections matter most. Don't skimp on reasoning.
 - Reference other ADRs by number when decisions are connected.
 - "Superseded" status means a later ADR replaced this one — link to it.
-- Record the decision even if it seems obvious now. Future readers (including the FCS assessment tool) need the reasoning, not just the outcome.
+- Record the decision even if it seems obvious now. Future readers need the reasoning, not just the outcome.
 - If deferring a decision deliberately, create an ADR with status "Proposed" documenting why we're deferring and what information would trigger the decision.
