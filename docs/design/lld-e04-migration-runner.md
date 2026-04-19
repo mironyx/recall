@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| Parent epic | E0.4 — Migration runner and initial schema |
-| Issues | #40, #41, #42, #43 |
+| Parent epic | #72 — E0: Phase 0: Foundation |
+| Task issue | #76 — E0.4: Migration runner and initial schema |
 | HLD components | Migration Runner, CLI |
 | ADRs | ADR-0001, ADR-0002, ADR-0009, ADR-0013 |
 | Status | Draft |
@@ -296,11 +296,13 @@ The migration runner is deliberately simple (~50 lines per ADR-0013). No
 internal decomposition beyond the single `apply_pending` function. The CLI
 is a thin dispatcher using `argparse` or `sys.argv` parsing.
 
-### Tasks
+### Files
 
-| # | Issue | Summary | Files touched |
-|---|-------|---------|---------------|
-| 1 | #40 | `apply_pending` function | `src/recall/db/__init__.py`, `src/recall/db/migrations.py` |
-| 2 | #41 | `0001_initial.sql` + `0002_projects.sql` | `src/recall/migrations/0001_initial.sql`, `src/recall/migrations/0002_projects.sql` |
-| 3 | #42 | `recall db migrate` CLI + serve startup hook | `src/recall/cli.py` |
-| 4 | #43 | Migration runner unit + integration tests | `tests/test_migrations.py` |
+Implemented as a single task (#76):
+
+- `src/recall/db/__init__.py` — package marker
+- `src/recall/db/migrations.py` — `apply_pending` function
+- `src/recall/migrations/0001_initial.sql` — store tables + scope CHECK
+- `src/recall/migrations/0002_projects.sql` — projects table
+- `src/recall/cli.py` — `db migrate` CLI + serve startup hook
+- `tests/test_migrations.py` — unit + integration tests

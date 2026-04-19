@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| Parent epic | E0.6 — Health endpoints and structured logging skeleton |
-| Issues | #49, #50, #51, #52, #53 |
+| Parent epic | #72 — E0: Phase 0: Foundation |
+| Task issue | #78 — E0.6: Health endpoints and structured logging skeleton |
 | HLD components | Health Endpoints, Tool Router (logging), MCP Transport |
 | ADRs | ADR-0006, ADR-0011 |
 | Status | Draft |
@@ -337,12 +337,13 @@ The `serve` subcommand (from E0.4) is updated to:
 | `logging.py` | structlog + stdlib bridge config | Pure configuration, no I/O |
 | `telemetry.py` | OTEL init (no-op or export) | Reads env vars, configures global tracer |
 
-### Tasks
+### Files
 
-| # | Issue | Summary | Files touched |
-|---|-------|---------|---------------|
-| 1 | #49 | `/healthz` and `/readyz` on Starlette app | `src/recall/server.py`, `src/recall/health.py` |
-| 2 | #50 | structlog config with contextvars | `src/recall/logging.py` |
-| 3 | #51 | Bridge stdlib/library logging into structlog | `src/recall/logging.py` |
-| 4 | #52 | OTEL no-op mode initialisation | `src/recall/telemetry.py` |
-| 5 | #53 | Boot + health smoke integration test | `tests/test_health.py` |
+Implemented as a single task (#78):
+
+- `src/recall/server.py` — Starlette ASGI app with health + MCP stub routes
+- `src/recall/health.py` — `/healthz` and `/readyz` handlers
+- `src/recall/logging.py` — structlog config with contextvars + stdlib bridge
+- `src/recall/telemetry.py` — OTEL no-op mode initialisation
+- `src/recall/cli.py` — `serve` wiring (logging → telemetry → migrations → app → uvicorn)
+- `tests/test_health.py` — boot + health smoke integration test

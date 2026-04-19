@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| Parent epic | E0.5 — Real-Postgres test fixture |
-| Issues | #44, #45, #46, #47, #48 |
+| Parent epic | #72 — E0: Phase 0: Foundation |
+| Task issue | #77 — E0.5: Real-Postgres test fixture |
 | HLD components | Cross-cutting test infrastructure |
 | ADRs | ADR-0008, ADR-0012, ADR-0013 |
 | Status | Draft |
@@ -299,12 +299,12 @@ class TestSmoke:
         ...
 ```
 
-### Tasks
+### Files
 
-| # | Issue | Summary | Files touched |
-|---|-------|---------|---------------|
-| 1 | #44 | Session-scoped testcontainers fixture | `tests/conftest.py` |
-| 2 | #45 | Per-test isolation (TRUNCATE) | `tests/conftest.py` |
-| 3 | #46 | `apply_pending` invoked once per session | `tests/conftest.py` |
-| 4 | #47 | Deterministic stub embeddings provider | `src/recall/embeddings/__init__.py`, `src/recall/embeddings/stub.py`, `tests/test_stub_embeddings.py` |
-| 5 | #48 | Smoke integration test | `tests/test_smoke.py` |
+Implemented as a single task (#77):
+
+- `tests/conftest.py` — session-scoped container, per-test TRUNCATE, apply_pending
+- `src/recall/embeddings/__init__.py` — package marker
+- `src/recall/embeddings/stub.py` — deterministic stub embeddings provider
+- `tests/test_stub_embeddings.py` — unit tests for stub provider
+- `tests/test_smoke.py` — smoke integration test
