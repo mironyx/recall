@@ -1,6 +1,8 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.0
+    # Keep in lockstep with the ruff version pyproject.toml resolves against
+    # so pre-commit formatting does not drift from `uv run ruff format` (CI).
+    rev: v0.15.11
     hooks:
       - id: ruff
         args: [--fix]

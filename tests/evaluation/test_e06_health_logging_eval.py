@@ -225,6 +225,6 @@ class TestNoPrintInSrc:
             capture_output=True,
             text=True,
         )
-        assert (
-            result.stdout.strip() == ""
-        ), f"Found bare print() calls in src/recall/:\n{result.stdout}"
+        assert result.stdout.strip() == "", (
+            f"Found bare print() calls in src/recall/:\n{result.stdout}"
+        )

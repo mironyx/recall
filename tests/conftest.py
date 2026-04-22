@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
+    # testcontainers ships without a py.typed marker; silence mypy's import-untyped check.
     from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
 
 

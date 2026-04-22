@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
+# asyncpg ships without a py.typed marker; silence mypy's import-untyped check.
 import asyncpg  # type: ignore[import-untyped]
 import structlog
 from starlette.requests import Request
@@ -37,10 +38,7 @@ async def readyz(request: Request) -> JSONResponse:
     """
     conn_string: str = request.app.state.conn_string
     try:
-        conn = await asyncio.wait_for(
-            asyncpg.connect(conn_string, timeout=_READYZ_CONNECT_TIMEOUT_SECONDS),
-            timeout=_READYZ_CONNECT_TIMEOUT_SECONDS,
-        )
+        conn = await asyncpg.connect(conn_string, timeout=_READYZ_CONNECT_TIMEOUT_SECONDS)
     except (TimeoutError, OSError, asyncpg.PostgresError) as exc:
         log.warning("readyz_db_unreachable", error=str(exc))
         return JSONResponse(
@@ -50,7 +48,7 @@ async def readyz(request: Request) -> JSONResponse:
 
     try:
         await asyncio.wait_for(conn.fetchval("SELECT 1"), timeout=_READYZ_QUERY_TIMEOUT_SECONDS)
-    except (TimeoutError, asyncpg.PostgresError) as exc:
+    except (TimeoutError, OSError, asyncpg.PostgresError) as exc:
         log.warning("readyz_query_failed", error=str(exc))
         return JSONResponse(
             {"status": "not_ready", "reason": f"database query failed: {exc}"},

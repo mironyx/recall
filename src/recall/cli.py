@@ -36,6 +36,9 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
     app = create_app(conn_string)
 
+    if getattr(args, "dry_run", False):
+        return
+
     import uvicorn
 
     uvicorn.run(app, host=args.host, port=args.port, log_config=None)
@@ -87,15 +90,6 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
 
     if args.command == "serve":
-        if getattr(args, "dry_run", False):
-            from recall.logging import configure_logging
-            from recall.server import create_app
-            from recall.telemetry import configure_telemetry
-
-            configure_logging(args.log_level)
-            configure_telemetry()
-            create_app(os.environ.get("DATABASE_URL", ""))
-            return
         _cmd_serve(args)
     elif args.command == "db":
         if getattr(args, "db_command", None) == "migrate":

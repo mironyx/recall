@@ -300,6 +300,6 @@ class TestBootAndHealthSmoke:
             for ln in lines
             if "event" in ln and ("level" in ln or "log_level" in ln) and "timestamp" in ln
         ]
-        assert (
-            well_formed
-        ), f"no log line carries the mandatory (event, level, timestamp) field set: {lines!r}"
+        assert well_formed, (
+            f"no log line carries the mandatory (event, level, timestamp) field set: {lines!r}"
+        )
