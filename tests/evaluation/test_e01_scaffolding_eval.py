@@ -56,8 +56,8 @@ class TestEntryPointStubs:
     """Installed `recall` script entry point produces clean exit codes."""
 
     def test_serve_via_entry_point(self) -> None:
-        """recall serve via installed entry point exits 0."""
-        result = _run_entry_point("serve")
+        """recall serve --dry-run via installed entry point exits 0."""
+        result = _run_entry_point("serve", "--dry-run")
         assert result.returncode == 0
 
     def test_db_migrate_via_entry_point(self) -> None:
@@ -95,8 +95,8 @@ class TestCLIEdgeCases:
         assert result.returncode == 0
 
     def test_serve_produces_no_unhandled_exception(self) -> None:
-        """recall serve stub must not emit a Python traceback."""
-        result = _run_cli("serve")
+        """recall serve --dry-run must not emit a Python traceback."""
+        result = _run_cli("serve", "--dry-run")
         assert "Traceback" not in result.stderr
         assert "Traceback" not in result.stdout
 

@@ -18,6 +18,10 @@ dependencies = [
     "pydantic>=2.7",
     "structlog>=24.1",
     "python-dotenv>=1.0",
+    "starlette>=0.37",                # ASGI app for health + MCP mounting
+    "uvicorn>=0.30",                  # ASGI server
+    "opentelemetry-api>=1.27",        # OTEL trace API (no-op by default)
+    "opentelemetry-sdk>=1.27",        # OTEL SDK (needed for context extraction)
 ]
 
 [project.optional-dependencies]
