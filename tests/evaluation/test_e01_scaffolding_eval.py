@@ -53,17 +53,23 @@ def _run_entry_point(*args: str, timeout: int = 10) -> subprocess.CompletedProce
 
 
 class TestEntryPointStubs:
-    """Installed `recall` script entry point produces clean exit codes."""
+    """Installed `recall` script entry point is wired and produces a clean
+    (non-traceback) exit code. After #76 both commands require ``DATABASE_URL``
+    and exit 1 when it is missing; the check here is that the entry point
+    itself is reachable and does not crash with a traceback.
+    """
 
     def test_serve_via_entry_point(self) -> None:
-        """recall serve via installed entry point exits 0."""
+        """recall serve via installed entry point prints a clean error."""
         result = _run_entry_point("serve")
-        assert result.returncode == 0
+        assert "Traceback" not in result.stderr
+        assert "Traceback" not in result.stdout
 
     def test_db_migrate_via_entry_point(self) -> None:
-        """recall db migrate via installed entry point exits 0."""
+        """recall db migrate via installed entry point prints a clean error."""
         result = _run_entry_point("db", "migrate")
-        assert result.returncode == 0
+        assert "Traceback" not in result.stderr
+        assert "Traceback" not in result.stdout
 
 
 # ---------------------------------------------------------------------------
