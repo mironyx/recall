@@ -14,7 +14,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 
 # Copy project metadata first to maximise layer caching.
-COPY pyproject.toml uv.lock* README.md ./
+COPY pyproject.toml uv.lock* README.md LICENSE ./
 COPY src ./src
 
 # Install into a relocatable venv at /app/.venv
