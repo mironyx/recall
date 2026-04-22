@@ -13,9 +13,9 @@ class TestCLIStubs:
     """CLI stub commands exit cleanly."""
 
     def test_serve_exits_cleanly(self) -> None:
-        """recall serve stub exits with code 0."""
+        """recall serve --dry-run wires logging/telemetry/app and exits 0."""
         result = subprocess.run(
-            [sys.executable, "-m", "recall.cli", "serve"],
+            [sys.executable, "-m", "recall.cli", "serve", "--dry-run"],
             capture_output=True,
             timeout=10,
         )

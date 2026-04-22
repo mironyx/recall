@@ -8,8 +8,10 @@
 | Task issue | #78 — E0.6: Health endpoints and structured logging skeleton |
 | HLD components | Health Endpoints, Tool Router (logging), MCP Transport |
 | ADRs | ADR-0006, ADR-0011 |
-| Status | Draft |
+| Status | Revised |
 | Date | 2026-04-12 |
+| Revised | 2026-04-22 | Issue #78 (post-implementation sync) |
+| Version | 0.2 |
 
 ---
 
@@ -182,7 +184,12 @@ def create_app(conn_string: str) -> Starlette:
     Mounts:
     - /healthz — liveness probe
     - /readyz  — readiness probe (DB check)
-    - /mcp     — MCP Streamable HTTP endpoint (stub in Phase 0)
+    - /mcp     — MCP Streamable HTTP endpoint _(deferred to Phase 1 — no stub shipped in #78)_
+
+    Also installs a :class:`RequestContextMiddleware` that binds a fresh
+    ``request_id`` + OTEL ``trace_id``/``span_id`` into the structlog
+    contextvar on every HTTP request, and emits one ``http_request`` JSON
+    event per request with ``method``, ``path``, ``status``, ``latency_ms``.
 
     Args:
         conn_string: Postgres connection string for readyz and store.
@@ -195,8 +202,24 @@ def create_app(conn_string: str) -> Starlette:
 
 **Design note:** The MCP Python SDK's Streamable HTTP server integrates with
 Starlette/ASGI. We create a Starlette app and mount both health endpoints and
-the MCP endpoint on it. In Phase 0 the MCP endpoint is a stub; health
-endpoints are real. `uvicorn` serves the app.
+the MCP endpoint on it. In Phase 0 the health endpoints are real;
+the MCP endpoint lands with real MCP routing in Phase 1 (no Phase 0 stub).
+`uvicorn` serves the app.
+
+> **Implementation note (issue #78):** The LLD originally listed `/mcp` as a
+> Phase 0 stub route. It was dropped — wiring a no-op route with no consumer
+> is future-refactor churn. `/mcp` is deferred to Phase 1 where it ships
+> alongside the real MCP Tool Router.
+
+> **Implementation note (issue #78):** The LLD's "Behavioural Flow —
+> Structured Logging on MCP Call" sequence specifies the transport-boundary
+> binding (generate `request_id`, extract `trace_id`/`span_id`, bind to
+> contextvar) but does not name a class. The behaviour ships as a pure-ASGI
+> class-based middleware, `RequestContextMiddleware`, installed via
+> `starlette.middleware.Middleware(RequestContextMiddleware)`. Starlette's
+> current guidance prefers pure-ASGI middleware over `BaseHTTPMiddleware`.
+> The middleware also emits one `http_request` event per call — the HTTP
+> counterpart of the Phase 1 `mcp_call` event (ADR-0011 §S6.3).
 
 #### `src/recall/health.py`
 
@@ -223,10 +246,21 @@ async def readyz(request: Request) -> JSONResponse:
 
 **Implementation details:**
 
-- The DB connection pool is stored on `request.app.state.pool` at startup.
-- `readyz` acquires a connection from the pool, runs `SELECT 1`, releases.
-- On `asyncpg.PostgresError` or timeout, returns 503 with a reason field.
+- `conn_string` is stashed on `request.app.state.conn_string`; each `/readyz` call
+  opens a short-lived `asyncpg.connect()`, runs `SELECT 1`, then closes.
+- Timeouts are split: 0.5 s connect + 0.3 s query, keeping the total under the 1 s SLA on the failure path.
+- Catches `TimeoutError`, `OSError`, and `asyncpg.PostgresError` on both the connect and query legs; logs a
+  structured `readyz_db_unreachable` / `readyz_query_failed` warning and returns 503 with a `reason` field.
 - No heavy queries — must respond within 1 second.
+
+> **Implementation note (issue #78):** The LLD originally prescribed a
+> shared connection pool on `app.state.pool` created at startup. The Phase 0
+> implementation instead opens a per-request asyncpg connection, because
+> Phase 0 has no other pool consumers and skipping the lifespan hook keeps
+> `create_app()` callable directly from in-process ASGI tests (httpx
+> `ASGITransport`) without introducing `asgi-lifespan` as a dev dep.
+> When the MCP tool surface lands in Phase 1 its store will own the pool
+> and `/readyz` will switch to acquiring from it.
 
 #### `src/recall/logging.py`
 
@@ -272,12 +306,18 @@ def unbind_request_context() -> None:
 
 **Key implementation details:**
 
-- **Processor chain:** `[ContextVarsProcessor, add_log_level, TimeStamper, JSONRenderer]`
-- **stdlib bridge:** `structlog.stdlib.ProcessorFormatter` attached to a
-  `logging.StreamHandler(sys.stdout)`. Set as the handler on the root logger.
-  This captures asyncpg, httpx, mcp SDK, and any other library logging.
+- **Processor chain:** `[merge_contextvars, add_log_level, TimeStamper(key="timestamp"), wrap_for_formatter]`.
+  The stdlib `ProcessorFormatter` runs the final `JSONRenderer` so structlog
+  events and bridged stdlib records share one pipeline.
+- **stdlib bridge:** `structlog.stdlib.ProcessorFormatter` attached to a single
+  `logging.StreamHandler(sys.stdout)`. The root logger's handlers are cleared
+  and replaced on every `configure_logging()` call so repeated configuration
+  (tests, reloads) does not duplicate output. Captures asyncpg, httpx, mcp SDK, and any other library logging.
 - **Log level:** Controlled by `LOG_LEVEL` env var. Defaults to `INFO`.
 - **No module-level loggers:** All code uses `structlog.get_logger()`.
+- **Context keys:** `bind_request_context` sets `request_id`, `trace_id`, and
+  `span_id`; `unbind_request_context` calls `unbind_contextvars` on just those
+  three keys (narrow scope — never `clear_contextvars`).
 
 #### `src/recall/telemetry.py`
 
@@ -310,12 +350,17 @@ def get_trace_context() -> tuple[str, str]:
 
 **Key implementation details:**
 
-- **No-op mode:** `NoOpTracerProvider` from `opentelemetry.api`. Zero
-  runtime cost. `get_trace_context()` returns empty strings.
-- **Export mode:** `OTLPSpanExporter` + `BatchSpanProcessor`. Auto-instrument
-  via `opentelemetry-instrumentation-*` packages (HTTP, asyncpg, httpx).
-- **Phase 0 scope:** Only the no-op path needs to work. Export mode is wired
-  but not exercised until Phase 4 (E4.2). The code exists to validate the
+- **No-op mode:** Relies on the default OpenTelemetry API tracer provider, which
+  returns a `NonRecordingSpan` with an invalid span context. Zero runtime cost,
+  no provider is installed in this branch. `get_trace_context()` formats the
+  `trace_id`/`span_id` as hex strings when a real span is present and returns
+  `("", "")` when the span context is invalid (the Phase 0 default).
+- **Export mode:** _(deferred to E4.2)_ `OTLPSpanExporter` +
+  `BatchSpanProcessor`, auto-instrumentation via `opentelemetry-instrumentation-*`
+  (HTTP, asyncpg, httpx). Phase 0 ships a warn-and-no-op branch that logs
+  `otel_export_unimplemented` when `OTEL_EXPORTER_OTLP_ENDPOINT` is set so an
+  operator who expects traces is not met with silence.
+- **Phase 0 scope:** Only the no-op path needs to work. The code exists to validate the
   initialisation path.
 
 #### CLI integration (`src/recall/cli.py` update)
@@ -324,18 +369,24 @@ The `serve` subcommand (from E0.4) is updated to:
 
 1. Call `configure_logging(log_level)` before anything else.
 2. Call `configure_telemetry()`.
-3. Optionally call `apply_pending()` (from E0.4).
-4. Create the ASGI app via `create_app()`.
-5. Run `uvicorn.run(app, host=host, port=port)`.
+3. Optionally call `apply_pending()` (from E0.4). _(deferred — migrations still run via `recall db migrate` in Phase 0.)_
+4. Read `DATABASE_URL`; if missing, log a `database_url_unset` structured warning via structlog
+   (not `sys.stderr.write` — all output must be JSON, per I3).
+5. Create the ASGI app via `create_app(conn_string)`.
+6. If `--dry-run` is passed, return — used by CI / tests to assert the wiring holds
+   without actually binding a port.
+7. Otherwise call `uvicorn.run(app, host=host, port=port, log_config=None)`
+   (`log_config=None` so uvicorn does not install its own handlers over the
+   structlog bridge).
 
 ### Internal Decomposition
 
 | Module | Responsibility | Boundary |
 |--------|---------------|----------|
-| `server.py` | ASGI app assembly, route mounting | Depends on health.py, delegates to MCP SDK |
-| `health.py` | /healthz and /readyz handlers | Reads DB pool from app.state |
-| `logging.py` | structlog + stdlib bridge config | Pure configuration, no I/O |
-| `telemetry.py` | OTEL init (no-op or export) | Reads env vars, configures global tracer |
+| `server.py` | ASGI app assembly, route mounting, `RequestContextMiddleware` | Depends on `health.py`, `logging.py`, `telemetry.py`; delegates to the MCP SDK (Phase 1) |
+| `health.py` | `/healthz` and `/readyz` handlers | Reads `conn_string` from `app.state`; opens short-lived asyncpg connections per `/readyz` call |
+| `logging.py` | structlog + stdlib bridge config, contextvar bind/unbind | Pure configuration, no I/O |
+| `telemetry.py` | OTEL init (no-op path; warn-on-endpoint-set for export path) | Reads env vars, consults the default OTEL tracer |
 
 ### Files
 
