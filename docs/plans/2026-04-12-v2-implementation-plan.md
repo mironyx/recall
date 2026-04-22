@@ -45,7 +45,7 @@ this plan.
 the container builds.
 
 **Why first.** Every later phase's exit criterion is "an integration test
-passes". That presupposes a test fixture (ADR-0012), a migration runner
+passes". That presupposes a test fixture (ADR-0012), schema setup
 (ADR-0013), and a container that boots. Building those after building
 features means features get tested against a stub harness and re-tested
 against the real one — exactly the LangMem v1 failure mode.
@@ -84,18 +84,17 @@ against the real one — exactly the LangMem v1 failure mode.
   - `docker compose up` brings Postgres+pgvector and Recall together;
     documented in README.
 
-### E0.4 — Migration runner and initial schema
+### E0.4 — Schema setup (ensure_schema)
 - **HLD reference:** Migration Runner.
-- **ADRs:** ADR-0001, ADR-0002, ADR-0013.
+- **ADRs:** ADR-0001, ADR-0002, ADR-0009, ADR-0013 (revised).
 - **Rough tasks:**
-  - In-app DDL runner (`apply_pending`) per ADR-0013.
-  - `0001_initial.sql` creating the memories table honouring ADR-0001's
-    flat value schema and ADR-0002's namespace shape, including the scope
-    CHECK constraint.
+  - Idempotent `ensure_schema()` function per revised ADR-0013: calls
+    `AsyncPostgresStore.setup()`, adds scope CHECK constraint (ADR-0001/0002),
+    creates `projects` table (ADR-0009).
   - `recall db migrate` CLI wrapper; `serve` startup hook (defaults on,
     env-flag to disable).
-  - Unit test of the runner against an empty container; integration test
-    of the initial schema's constraint behaviour.
+  - Integration tests for schema correctness (constraint behaviour,
+    table existence, store usability).
 
 ### E0.5 — Real-Postgres test fixture
 - **HLD reference:** cross-cutting test infra.

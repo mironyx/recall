@@ -13,10 +13,10 @@ DEFAULT_PORT = 8080
 def _cmd_serve(args: argparse.Namespace) -> None:
     """Start the Recall MCP server.
 
-    Wires logging → telemetry → ASGI app → uvicorn. DB migrations are a separate
-    ``recall db migrate`` step in Phase 0 and will be run on startup behind a
-    flag in a later epic.
+    Wires logging → telemetry → optional auto-migrate → ASGI app → uvicorn.
     """
+    import asyncio
+
     import structlog
 
     from recall.logging import configure_logging
@@ -33,6 +33,14 @@ def _cmd_serve(args: argparse.Namespace) -> None:
             "database_url_unset",
             message="DATABASE_URL is not set; /readyz will return 503 until it is.",
         )
+    elif _migrate_on_startup():
+        from recall.db.schema import ensure_schema
+
+        try:
+            asyncio.run(ensure_schema(conn_string))
+        except Exception:
+            log.exception("schema_setup_failed")
+            sys.exit(1)
 
     app = create_app(conn_string)
 
@@ -44,9 +52,38 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     uvicorn.run(app, host=args.host, port=args.port, log_config=None)
 
 
-def _cmd_db_migrate(args: argparse.Namespace) -> None:
-    """Run pending database migrations (stub)."""
-    del args  # unused
+_FALSY_ENV_VALUES = frozenset({"0", "false", "no", "off", ""})
+
+
+def _migrate_on_startup() -> bool:
+    """Whether ``recall serve`` should run ``ensure_schema`` on startup."""
+    value = os.environ.get("RECALL_DB_MIGRATE_ON_STARTUP", "true").strip().lower()
+    return value not in _FALSY_ENV_VALUES
+
+
+def _require_database_url() -> str:
+    """Read ``DATABASE_URL`` from env or exit non-zero."""
+    conn_string = os.environ.get("DATABASE_URL")
+    if not conn_string:
+        print("error: DATABASE_URL is not set", file=sys.stderr)
+        sys.exit(1)
+    return conn_string
+
+
+def _cmd_db_migrate(_args: argparse.Namespace) -> None:
+    """Run idempotent schema setup and report."""
+    conn_string = _require_database_url()
+
+    import asyncio
+
+    from recall.db.schema import ensure_schema
+
+    try:
+        asyncio.run(ensure_schema(conn_string))
+    except Exception as exc:
+        print(f"error: schema setup failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print("Schema is up to date")
 
 
 def _build_parser() -> tuple[argparse.ArgumentParser, argparse.ArgumentParser]:

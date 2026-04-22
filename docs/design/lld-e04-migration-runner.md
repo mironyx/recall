@@ -1,4 +1,4 @@
-# LLD — E0.4: Migration Runner and Initial Schema
+# LLD — E0.4: Schema Setup (ensure_schema)
 
 ## Document Control
 
@@ -7,9 +7,9 @@
 | Parent epic | #72 — E0: Phase 0: Foundation |
 | Task issue | #76 — E0.4: Migration runner and initial schema |
 | HLD components | Migration Runner, CLI |
-| ADRs | ADR-0001, ADR-0002, ADR-0009, ADR-0013 |
+| ADRs | ADR-0001, ADR-0002, ADR-0009, ADR-0013 (revised) |
 | Status | Draft |
-| Date | 2026-04-12 |
+| Date | 2026-04-22 (rewrite of 2026-04-12 original) |
 
 ---
 
@@ -17,31 +17,28 @@
 
 ### Purpose
 
-Deliver the in-app DDL migration runner described in ADR-0013, the initial SQL
-migration that creates the store tables (via `AsyncPostgresStore.setup()`) with
-the scope CHECK constraint from ADR-0001/ADR-0002, the `recall db migrate` CLI
-command, and the auto-migrate-on-startup hook for `recall serve`.
+Deliver the idempotent `ensure_schema()` function described in the revised
+ADR-0013, the `recall db migrate` CLI command, and the auto-migrate-on-startup
+hook for `recall serve`. Replaces the original migration-runner design with a
+simpler approach: call `AsyncPostgresStore.setup()` then execute two idempotent
+DDL statements inline.
 
-### Behavioural Flow — Migration on Startup
+### Behavioural Flow — Schema Setup on Startup
 
 ```mermaid
 sequenceDiagram
     participant CLI as recall serve
-    participant MR as MigrationRunner
+    participant ES as ensure_schema()
+    participant Store as AsyncPostgresStore
     participant DB as Postgres
 
-    CLI->>MR: apply_pending(conn_string)
-    MR->>DB: CREATE TABLE IF NOT EXISTS schema_migrations(...)
-    MR->>DB: LOCK TABLE schema_migrations IN ACCESS EXCLUSIVE MODE
-    MR->>DB: SELECT version FROM schema_migrations
-    MR->>MR: diff applied vs. files in migrations/
-    loop For each pending migration
-        MR->>DB: BEGIN
-        MR->>DB: execute(migration SQL)
-        MR->>DB: INSERT INTO schema_migrations(version)
-        MR->>DB: COMMIT
-    end
-    MR-->>CLI: list of applied versions
+    CLI->>ES: ensure_schema(conn_string)
+    ES->>Store: from_conn_string + setup()
+    Store->>DB: CREATE TABLE IF NOT EXISTS store, store_vectors, ...
+    Store-->>ES: done
+    ES->>DB: DO $$ ALTER TABLE store ADD CONSTRAINT ... EXCEPTION WHEN duplicate_object $$
+    ES->>DB: CREATE TABLE IF NOT EXISTS projects (...)
+    ES-->>CLI: done
 ```
 
 ### Behavioural Flow — `recall db migrate`
@@ -50,14 +47,14 @@ sequenceDiagram
 sequenceDiagram
     participant Op as Operator
     participant CLI as recall db migrate
-    participant MR as MigrationRunner
+    participant ES as ensure_schema()
     participant DB as Postgres
 
     Op->>CLI: recall db migrate
     CLI->>CLI: load DATABASE_URL from env
-    CLI->>MR: apply_pending(conn_string)
-    MR-->>CLI: applied versions
-    CLI->>Op: "Applied 2 migrations: 0001_initial, 0002_projects"
+    CLI->>ES: ensure_schema(conn_string)
+    ES-->>CLI: done
+    CLI->>Op: "Schema is up to date"
 ```
 
 ### Structural Overview
@@ -66,75 +63,86 @@ sequenceDiagram
 graph LR
     subgraph "src/recall/"
         CLI["cli.py"]
-        MR["db/migrations.py"]
-        M1["migrations/0001_initial.sql"]
-        M2["migrations/0002_projects.sql"]
+        DB["db/schema.py"]
     end
-    DB["Postgres"]
+    PG["Postgres"]
 
-    CLI --> MR
-    MR --> M1
-    MR --> M2
-    MR --> DB
+    CLI --> DB
+    DB --> PG
 ```
 
 ### Invariants
 
 | # | Invariant | Verification |
 |---|-----------|-------------|
-| I1 | Running `apply_pending` twice is idempotent — second run applies nothing | Integration test: call twice, assert second returns empty list |
-| I2 | Concurrent `apply_pending` calls do not interleave — table lock serialises them | Integration test: two concurrent calls, both succeed, migrations applied exactly once |
-| I3 | A failing migration rolls back its own transaction — no partial application | Integration test: migration with deliberate error, assert schema_migrations unchanged |
-| I4 | `scope=global` requires `project_id='_'`; `scope=project` requires `project_id != '_'` | Integration test: INSERT violating CHECK raises |
-| I5 | `lower(id) = 'global'` rejected in projects table | Integration test: INSERT 'Global' into projects raises |
-| I6 | `0001_initial.sql` calls `AsyncPostgresStore.setup()` — store tables exist after migration | Integration test: after apply_pending, store.aput succeeds |
+| I1 | Running `ensure_schema` twice is idempotent — second run changes nothing | Integration test: call twice, second succeeds without error |
+| I2 | `scope=global` requires `project_id='_'`; `scope=project` requires `project_id != '_'` | Integration test: INSERT violating CHECK raises |
+| I3 | `lower(id) = 'global'` rejected in projects table | Integration test: INSERT 'Global' into projects raises |
+| I4 | After `ensure_schema`, `AsyncPostgresStore.aput` succeeds | Integration test: aput after ensure_schema works |
 
 ### Acceptance Criteria + BDD Specs
 
 ```python
-class TestApplyPending:
-    """Integration tests for the migration runner."""
+class TestEnsureSchema:
+    """Integration tests for ensure_schema."""
 
-    async def test_applies_all_pending_migrations(self, pg_conn: str) -> None:
-        """Given an empty DB, apply_pending runs all migrations in order."""
+    async def test_creates_all_tables(self, pg_conn: str) -> None:
+        """Given an empty DB, ensure_schema creates store, store_vectors, projects."""
 
     async def test_idempotent_second_run(self, pg_conn: str) -> None:
-        """Given a fully migrated DB, apply_pending returns an empty list."""
+        """Given a fully set-up DB, ensure_schema succeeds with no errors."""
 
-    async def test_partial_failure_rolls_back(self, pg_conn: str) -> None:
-        """Given a migration that raises, schema_migrations has no entry for it."""
-
-    async def test_concurrent_calls_serialise(self, pg_conn: str) -> None:
-        """Given two concurrent apply_pending calls, migrations apply exactly once."""
+    async def test_store_usable_after_setup(self, pg_conn: str) -> None:
+        """After ensure_schema, AsyncPostgresStore.aput succeeds."""
 
 
-class TestInitialMigration:
-    """Integration tests for 0001_initial.sql."""
+class TestScopeConstraint:
+    """Integration tests for the scope CHECK constraint."""
 
-    async def test_store_tables_created(self, migrated_db: str) -> None:
-        """After 0001, the store and store_vectors tables exist."""
+    async def test_global_requires_underscore(self, migrated_db: str) -> None:
+        """INSERT with prefix='global.myproj' violates CHECK."""
 
-    async def test_scope_check_global_requires_underscore(self, migrated_db: str) -> None:
-        """INSERT with scope='global', project_id='myproj' violates CHECK."""
+    async def test_project_rejects_underscore(self, migrated_db: str) -> None:
+        """INSERT with prefix='project._' violates CHECK."""
 
-    async def test_scope_check_project_rejects_underscore(self, migrated_db: str) -> None:
-        """INSERT with scope='project', project_id='_' violates CHECK."""
+    async def test_happy_path_project(self, migrated_db: str) -> None:
+        """INSERT with prefix='project.myproj' succeeds."""
 
-    async def test_scope_check_happy_path(self, migrated_db: str) -> None:
-        """INSERT with scope='project', project_id='myproj' succeeds."""
+    async def test_happy_path_global(self, migrated_db: str) -> None:
+        """INSERT with prefix='global._' succeeds."""
 
 
-class TestProjectsMigration:
-    """Integration tests for 0002_projects.sql."""
+class TestProjectsTable:
+    """Integration tests for the projects table."""
 
     async def test_projects_table_created(self, migrated_db: str) -> None:
-        """After 0002, the projects table exists with expected columns."""
+        """After ensure_schema, the projects table exists with expected columns."""
 
     async def test_global_name_rejected(self, migrated_db: str) -> None:
         """INSERT with id='Global' (any case) violates CHECK."""
 
     async def test_valid_project_accepted(self, migrated_db: str) -> None:
         """INSERT with id='my-project' succeeds."""
+
+
+class TestCliDbMigrate:
+    """CLI-level tests for `recall db migrate`."""
+
+    async def test_exits_zero_on_success(self, pg_conn: str) -> None:
+        """`recall db migrate` with DATABASE_URL exits 0."""
+
+    def test_exits_one_without_database_url(self) -> None:
+        """Without DATABASE_URL, exits 1 with clean error."""
+
+
+class TestCliServeStartup:
+    """`recall serve` auto-migrate hook."""
+
+    async def test_default_runs_schema_setup(self, pg_conn: str) -> None:
+        """Default (flag unset) → schema is set up on startup."""
+
+    async def test_false_skips_schema_setup(self, pg_conn: str) -> None:
+        """RECALL_DB_MIGRATE_ON_STARTUP=false → schema NOT set up."""
 ```
 
 ---
@@ -143,66 +151,8 @@ class TestProjectsMigration:
 
 ### HLD Coverage
 
-- **Migration Runner** component — fully covered by this LLD.
-- **CLI** component (`recall db migrate`) — the migration subcommand is covered here; `recall serve` startup hook is covered here; other CLI commands are out of scope.
-
-### Layer: DB
-
-#### `src/recall/migrations/0001_initial.sql`
-
-Calls `AsyncPostgresStore.setup()` to create the `store`, `store_vectors`,
-`store_migrations`, and `vector_migrations` tables. Then adds the scope CHECK
-constraint on the `store` table.
-
-```sql
--- 0001_initial.sql
--- Bootstrap the LangGraph store tables and add scope invariant.
---
--- NOTE: AsyncPostgresStore.setup() is called from Python before this file
--- executes, because setup() is not pure SQL — it's a Python method.
--- This migration file adds only the CHECK constraint that setup() doesn't know about.
-
--- Scope invariant (ADR-0001, ADR-0002):
---   scope='global'  → project_id must be '_'
---   scope='project' → project_id must not be '_'
---
--- The namespace is stored in the `prefix` column as '<scope>.<project_id>'.
--- We enforce the invariant via a CHECK on prefix patterns.
-ALTER TABLE store ADD CONSTRAINT store_scope_invariant CHECK (
-    (prefix LIKE 'global._' || '.%' OR prefix = 'global._')
-    OR
-    (prefix LIKE 'project.%' AND prefix NOT LIKE 'project._.%' AND prefix != 'project._')
-);
-```
-
-**Design note:** The `prefix` column encodes `(scope, project_id)` as a
-dot-separated string. The CHECK operates on this encoded form. The exact
-encoding is determined by LangGraph's `_namespace_to_text`. We validate this
-encoding in integration tests — if LangGraph changes the separator, the CHECK
-will catch mismatches on first write.
-
-**Revised approach:** Since `AsyncPostgresStore.setup()` is a Python async
-method (not pure SQL), the migration runner must handle `0001_initial` as a
-special case. The cleanest approach: `apply_pending` calls `store.setup()`
-**before** processing SQL files, ensuring the store tables exist for any
-SQL migration to reference. The `0001_initial.sql` file then contains only
-the CHECK constraint ALTER. This keeps the "one migration path" invariant
-from ADR-0013 — `setup()` is called exactly once, from within `apply_pending`.
-
-#### `src/recall/migrations/0002_projects.sql`
-
-```sql
--- 0002_projects.sql
--- Project registry table (ADR-0009).
-
-CREATE TABLE IF NOT EXISTS projects (
-    id           text PRIMARY KEY,
-    display_name text NOT NULL,
-    created_at   timestamptz NOT NULL DEFAULT now(),
-    created_by   text NOT NULL,
-    CONSTRAINT projects_no_global CHECK (lower(id) != 'global')
-);
-```
+- **Migration Runner** component — fully covered by this LLD (as `ensure_schema`).
+- **CLI** component (`recall db migrate`) — the migration subcommand is covered here; `recall serve` startup hook is covered here.
 
 ### Layer: BE
 
@@ -210,99 +160,107 @@ CREATE TABLE IF NOT EXISTS projects (
 
 Empty. Package marker.
 
-#### `src/recall/db/migrations.py`
+#### `src/recall/db/schema.py`
 
 ```python
-"""In-app DDL migration runner (ADR-0013)."""
+"""Idempotent schema setup (revised ADR-0013)."""
 
-from pathlib import Path
+from __future__ import annotations
 
-MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
+import os
+from collections.abc import Sequence
+
+import psycopg
+from langgraph.store.postgres import AsyncPostgresStore
+from langgraph.store.postgres.base import PostgresIndexConfig
+
+_DEFAULT_DIMS = 1536
+
+_SCOPE_CHECK_SQL = """\
+DO $$ BEGIN
+    ALTER TABLE store ADD CONSTRAINT store_scope_invariant CHECK (
+        prefix = 'global._'
+        OR (prefix LIKE 'project.%' AND prefix != 'project._')
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+"""
+
+_PROJECTS_TABLE_SQL = """\
+CREATE TABLE IF NOT EXISTS projects (
+    id           text PRIMARY KEY,
+    display_name text NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    created_by   text NOT NULL,
+    CONSTRAINT projects_no_global CHECK (lower(id) != 'global')
+);
+"""
 
 
-async def apply_pending(conn_string: str) -> list[str]:
-    """Apply all pending SQL migrations.
+def _phase0_index_config() -> PostgresIndexConfig:
+    """Return a minimal PostgresIndexConfig sufficient for setup() DDL."""
 
-    1. Open a connection to Postgres.
-    2. Create AsyncPostgresStore and call setup() — ensures store tables exist.
-    3. Create schema_migrations table if not exists.
-    4. Lock schema_migrations (ACCESS EXCLUSIVE).
-    5. Read applied versions.
-    6. Walk MIGRATIONS_DIR, apply pending files in filename order.
-    7. Return list of newly applied version strings.
+    def _noop_embed(texts: Sequence[str]) -> list[list[float]]:
+        raise RuntimeError("Phase-0 placeholder; wire a real provider.")
 
-    Each migration runs in its own transaction. On failure the transaction
-    rolls back and the function raises — no partial state.
+    raw_dims = os.environ.get("RECALL_EMBEDDING_DIMS")
+    dims = int(raw_dims) if raw_dims else _DEFAULT_DIMS
+    return PostgresIndexConfig(dims=dims, embed=_noop_embed)
+
+
+async def ensure_schema(conn_string: str) -> None:
+    """Create all required tables and constraints. Idempotent.
+
+    1. AsyncPostgresStore.setup() — store + store_vectors.
+    2. Scope CHECK constraint on store table.
+    3. Projects table.
     """
-    ...
+    async with AsyncPostgresStore.from_conn_string(
+        conn_string, index=_phase0_index_config()
+    ) as store:
+        await store.setup()
+
+    async with await psycopg.AsyncConnection.connect(
+        conn_string, autocommit=True
+    ) as conn:
+        await conn.execute(_SCOPE_CHECK_SQL)
+        await conn.execute(_PROJECTS_TABLE_SQL)
 ```
-
-**Internal types:**
-
-```python
-# No custom types needed — versions are plain strings (e.g. "0001_initial").
-# The function signature is the contract.
-```
-
-**Key implementation details:**
-
-- Connection: use raw `asyncpg` (not the store) for migration DDL. The store
-  is created with `AsyncPostgresStore.from_conn_string()` solely to call
-  `setup()`, then closed.
-- Locking: `LOCK TABLE schema_migrations IN ACCESS EXCLUSIVE MODE` inside a
-  transaction. This serialises concurrent runners.
-- File discovery: `sorted(MIGRATIONS_DIR.glob("*.sql"))`. Version is the
-  filename stem (e.g. `0001_initial`).
-- Per-file execution: `conn.execute(sql_text)` inside its own transaction.
-  On success, `INSERT INTO schema_migrations(version)`. On exception,
-  transaction rolls back, exception re-raised.
 
 #### `src/recall/cli.py`
 
-```python
-"""Recall CLI entrypoint."""
+Update `_cmd_serve` and `_cmd_db_migrate` to call `ensure_schema` instead of
+`apply_pending`. Same env-var contract (`DATABASE_URL`,
+`RECALL_DB_MIGRATE_ON_STARTUP`). Same exit codes.
 
-import asyncio
-import sys
+### Layer: Test
 
+#### `tests/conftest.py`
 
-def main() -> None:
-    """Main CLI dispatcher.
+Keep the session-scoped pgvector container and `pg_conn` / `migrated_db`
+fixtures from the existing PR. Change `migrated_db` to call `ensure_schema`
+instead of `apply_pending`. Drop the `schema_migrations` table from the
+cleanup list (it no longer exists).
 
-    Subcommands:
-        serve     — start the MCP server (stub in Phase 0)
-        db migrate — run pending migrations
-    """
-    ...
-```
+#### `tests/test_schema.py`
 
-**`db migrate` subcommand:**
-
-- Reads `DATABASE_URL` from environment (required).
-- Calls `apply_pending(conn_string)`.
-- Prints applied migrations to stdout.
-- Exits 0 on success, 1 on failure.
-
-**`serve` startup hook:**
-
-- Before starting the MCP server, checks `RECALL_DB_MIGRATE_ON_STARTUP`
-  (default: `"true"`).
-- If truthy, calls `apply_pending(conn_string)`.
-- If migration fails, the server does not start (fail-fast).
-
-### Internal Decomposition
-
-The migration runner is deliberately simple (~50 lines per ADR-0013). No
-internal decomposition beyond the single `apply_pending` function. The CLI
-is a thin dispatcher using `argparse` or `sys.argv` parsing.
+Integration tests per the BDD specs above. Simpler than `test_migrations.py`:
+no concurrency tests, no partial-rollback tests, no migration-ordering tests.
+Focus on schema correctness (tables exist, constraints enforce invariants,
+store is usable).
 
 ### Files
 
-Implemented as a single task (#76):
-
 - `src/recall/db/__init__.py` — package marker
-- `src/recall/db/migrations.py` — `apply_pending` function
-- `src/recall/migrations/0001_initial.sql` — store tables + scope CHECK
-- `src/recall/migrations/0002_projects.sql` — projects table
-- `src/recall/cli.py` — `db migrate` CLI + serve startup hook
-- `tests/test_migrations.py` — unit + integration tests
+- `src/recall/db/schema.py` — `ensure_schema` function
+- `src/recall/cli.py` — updated `db migrate` + serve startup
+- `tests/conftest.py` — test fixtures
+- `tests/test_schema.py` — integration tests
+- `tests/test_cli.py` — updated CLI tests
+
+### Deleted files (from PR #82, if any were merged)
+
+- `src/recall/db/migrations.py` — replaced by `schema.py`
+- `src/recall/migrations/` — entire directory, no longer needed
+- `tests/test_migrations.py` — replaced by `test_schema.py`
+- `tests/evaluation/test_e04_migration_runner_eval.py` — no longer applicable
