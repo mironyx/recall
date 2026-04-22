@@ -37,7 +37,14 @@ def _phase0_index_config() -> PostgresIndexConfig:
     def _noop_embed(texts: Sequence[str]) -> list[list[float]]:
         raise RuntimeError("Phase-0 placeholder embed called at runtime; wire a real provider.")
 
-    dims = int(os.environ.get("RECALL_EMBEDDING_DIMS", _DEFAULT_DIMS))
+    raw_dims = os.environ.get("RECALL_EMBEDDING_DIMS")
+    if raw_dims is None:
+        dims = _DEFAULT_DIMS
+    else:
+        try:
+            dims = int(raw_dims)
+        except ValueError as exc:
+            raise ValueError(f"RECALL_EMBEDDING_DIMS must be an integer, got {raw_dims!r}") from exc
     return PostgresIndexConfig(dims=dims, embed=_noop_embed)
 
 
