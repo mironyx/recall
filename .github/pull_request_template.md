@@ -9,7 +9,7 @@ See docs/process/engineering-process.md for the full pipeline.
 
 ## Issue
 
-<!-- e.g. Closes #123 -->
+<!-- Link the tracking ticket. e.g. Closes #123 (GitHub), PROJ-456 (Jira), LIN-789 (Linear). -->
 
 ## Design reference
 
@@ -40,3 +40,31 @@ If none, write "None".
 - [ ] `uv run ruff check .` — clean
 - [ ] `uv run ruff format --check .` — clean
 - [ ] Design contracts verified (field names, types, schemas match)
+
+## Verification
+
+<!--
+- **Tests added:** <N> (brief: unit / integration / evaluation / BDD breakdown)
+- **Total tests:** <N> (<M> test files)
+- Notes on manual verification, fixtures used, edge cases exercised.
+-->
+
+## Process notes
+
+<!--
+Anything about how the work was done that reviewers should know:
+evaluator adversarial test count, PR size warnings, dropped scope, follow-up tickets.
+If none, write "None".
+-->
+
+## Usage
+
+<!--
+Cost and resource usage for this PR, captured from OpenTelemetry.
+Example:
+- **LLM tokens:** <input> in / <output> out
+- **Cost:** $<amount>
+- **Wall time:** <duration>
+- **Trace:** <link to OTel trace / dashboard>
+If not captured, write "Not captured" and say why.
+-->
