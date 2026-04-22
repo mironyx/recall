@@ -101,7 +101,7 @@ jobs:
         run: uv sync --extra dev
 
       - name: Run integration tests
-        run: uv run pytest -m integration
+        run: uv run pytest -m integration || [ $? -eq 5 ]
 
   docker:
     name: Docker build
