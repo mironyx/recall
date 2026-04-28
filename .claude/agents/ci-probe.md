@@ -94,3 +94,4 @@ Return a concise summary:
 - **Strip setup noise** from log output. Only show lines with `error`, `Error`, `failed`, `FAILED`, or the last 10 lines of the failed step.
 - **Be concise.** The calling agent needs the failure reason, not the full log.
 - **Do not modify any files.** Read-only. Report findings only.
+- **Max 5 lines.** Return: `CI PASS` or `CI FAIL: <job-name> — <one-line reason>`. List at most 3 failed jobs.

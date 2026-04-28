@@ -120,8 +120,15 @@ to make the tests pass.
 - If a test is uncompilable because a type is wrong, fix the test's type annotation but
   keep the assertion identical.
 
-Run `uv run pytest <test-file>` after each small increment. Continue until all tests
-in the file pass.
+Run the target test file after each small increment:
+
+```bash
+bash scripts/pytest-summary.sh <test-file>
+```
+
+This emits a single compact line (`PASS N/N -- Xs` or `FAIL N/N ...`) without launching a sub-agent.
+
+Continue until all tests in the file pass.
 
 #### Step 4d: Self-check coverage before Step 5
 
@@ -132,14 +139,15 @@ into the sub-agent's prompt).
 
 ### Step 5: Full verification
 
-Run all checks. **All must pass — zero failures, including integration tests — before proceeding.**
+Delegate all checks to the `test-runner` agent — **do not run these as Bash directly**.
+This keeps verbose output out of the main context.
 
-```bash
-uv run pytest                                    # full suite — unit + integration, not just new tests
-uv run mypy                                      # strict mode — no type errors
-uv run ruff check .                              # lint — no errors
-uv run ruff format --check .                     # format — no drift
 ```
+Launch Agent: test-runner
+Input: command="uv run pytest && uv run mypy && uv run ruff check . && uv run ruff format --check ."
+```
+
+All must pass — zero failures, including integration tests — before proceeding.
 
 **Run the full suite, not just the test files you wrote.** `uv run pytest` with no filter runs
 every test in the repo. If you see pre-existing failures, they are your problem — fix them.
