@@ -61,7 +61,6 @@ def postgres_dsn(postgres_container: PostgresContainer) -> str:
 # ---------------------------------------------------------------------------
 
 _TABLES_TO_DROP = (
-    "projects",
     "store_vectors",
     "store",
     "store_migrations",

@@ -37,19 +37,6 @@ async def _table_exists(conn_string: str, table: str) -> bool:
         return (await cur.fetchone()) is not None
 
 
-async def _column_names(conn_string: str, table: str) -> set[str]:
-    async with (
-        await psycopg.AsyncConnection.connect(conn_string) as conn,
-        conn.cursor() as cur,
-    ):
-        await cur.execute(
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = 'public' AND table_name = %s",
-            (table,),
-        )
-        return {r[0] for r in await cur.fetchall()}
-
-
 # ---------------------------------------------------------------------------
 # TestEnsureSchema — core contract
 # ---------------------------------------------------------------------------
@@ -59,11 +46,10 @@ class TestEnsureSchema:
     """Integration tests for ensure_schema."""
 
     async def test_creates_all_tables(self, pg_conn: str) -> None:
-        """Given an empty DB, ensure_schema creates store, store_vectors, projects."""
+        """Given an empty DB, ensure_schema creates store and store_vectors."""
         await ensure_schema(pg_conn)
         assert await _table_exists(pg_conn, "store")
         assert await _table_exists(pg_conn, "store_vectors")
-        assert await _table_exists(pg_conn, "projects")
 
     async def test_idempotent_second_run(self, pg_conn: str) -> None:
         """Given a fully set-up DB, ensure_schema succeeds with no errors."""
@@ -162,45 +148,6 @@ class TestScopeConstraint:
 
 
 # ---------------------------------------------------------------------------
-# TestProjectsTable — projects table (ADR-0009)
-# ---------------------------------------------------------------------------
-
-
-class TestProjectsTable:
-    """Integration tests for the projects table."""
-
-    async def test_projects_table_shape(self, migrated_db: str) -> None:
-        """Projects table exists with expected columns."""
-        assert await _table_exists(migrated_db, "projects")
-        cols = await _column_names(migrated_db, "projects")
-        assert {"id", "display_name", "created_at", "created_by"} <= cols
-
-    async def test_global_name_rejected(self, migrated_db: str) -> None:
-        """INSERT with id='Global' (any case) violates CHECK."""
-        async with (
-            await psycopg.AsyncConnection.connect(migrated_db) as conn,
-            conn.cursor() as cur,
-        ):
-            with pytest.raises(pg_errors.CheckViolation):
-                await cur.execute(
-                    "INSERT INTO projects (id, display_name, created_by) VALUES (%s, %s, %s)",
-                    ("Global", "Global project", "operator-1"),
-                )
-
-    async def test_valid_project_accepted(self, migrated_db: str) -> None:
-        """INSERT with id='my-project' succeeds."""
-        async with (
-            await psycopg.AsyncConnection.connect(migrated_db) as conn,
-            conn.cursor() as cur,
-        ):
-            await cur.execute(
-                "INSERT INTO projects (id, display_name, created_by) VALUES (%s, %s, %s)",
-                ("my-project", "My Project", "operator-1"),
-            )
-            await conn.commit()
-
-
-# ---------------------------------------------------------------------------
 # TestCliDbMigrate — CLI level
 # ---------------------------------------------------------------------------
 
@@ -241,7 +188,6 @@ class TestCliServeStartup:
             env=env,
         )
         assert await _table_exists(pg_conn, "store")
-        assert await _table_exists(pg_conn, "projects")
 
     async def test_false_skips_schema_setup(self, pg_conn: str) -> None:
         """RECALL_DB_MIGRATE_ON_STARTUP=false → schema NOT set up."""

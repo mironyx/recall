@@ -1,4 +1,4 @@
-"""Idempotent schema setup (ADR-0013 revised)."""
+"""Idempotent schema setup (ADR-0013 revised, ADR-0014)."""
 
 from __future__ import annotations
 
@@ -19,16 +19,6 @@ DO $$ BEGIN
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
-"""
-
-_PROJECTS_TABLE_SQL = """\
-CREATE TABLE IF NOT EXISTS projects (
-    id           text PRIMARY KEY,
-    display_name text NOT NULL,
-    created_at   timestamptz NOT NULL DEFAULT now(),
-    created_by   text NOT NULL,
-    CONSTRAINT projects_no_global CHECK (lower(id) != 'global')
-);
 """
 
 
@@ -53,7 +43,8 @@ async def ensure_schema(conn_string: str) -> None:
 
     1. ``AsyncPostgresStore.setup()`` — ``store``, ``store_vectors``, internal ledgers.
     2. Scope CHECK constraint on the ``store`` table (ADR-0001 / ADR-0002).
-    3. ``projects`` table (ADR-0009).
+
+    The ``projects`` table is deferred (ADR-0014).
     """
     async with AsyncPostgresStore.from_conn_string(
         conn_string, index=_phase0_index_config()
@@ -62,4 +53,3 @@ async def ensure_schema(conn_string: str) -> None:
 
     async with await psycopg.AsyncConnection.connect(conn_string, autocommit=True) as conn:
         await conn.execute(_SCOPE_CHECK_SQL)
-        await conn.execute(_PROJECTS_TABLE_SQL)
