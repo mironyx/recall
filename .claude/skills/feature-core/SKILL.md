@@ -14,6 +14,16 @@ Executes the implementation cycle from design reading through PR review. Called 
 
 **Usage:** `/feature-core <issue-number>` — not typically invoked directly; called by `/feature` and `/feature-team` skills.
 
+## Critical rules
+
+These override any conflicting instinct. Violations are the top cost drivers.
+
+1. **Never run `uv run pytest` without a file filter in Step 4.** Use `bash scripts/pytest-summary.sh <test-file>`. The full suite runs once in Step 5 — nowhere else.
+2. **Step 5 uses `test-runner` agent, not Bash.** All verification commands run inside the agent — zero test output reaches the main context. This applies to single-file runs during the fix loop too.
+3. **Pass pointers to sub-agents, not content.** File paths, issue numbers, LLD paths. Never paste diffs or file contents into agent prompts.
+4. **Never invoke `/simplify`.** Only if the user explicitly asks.
+5. **Do not move the board item to Done.** `/feature-end` handles that.
+
 ## Steps
 
 Execute sequentially. Do not skip steps. Do not ask for confirmation — only pause on blockers.
@@ -41,11 +51,57 @@ unnecessarily complex for the actual problem, you may implement a simpler altern
 Do not deviate silently — traceability matters. `/lld-sync` reads the PR body to pick up these
 notes and update the design doc accordingly.
 
-### Step 4: Implement with independent test authorship
+### Step 3c: Classify change pressure
 
-The tests must be written by a separate agent, against the spec only, before any
-implementation behaviour is written. This is the only way to stop the LLM from picking
-assertions it already knows its about-to-be-written code will satisfy.
+After picking the approach but before writing code, estimate the change size and set the
+**pressure tier**. This controls how much ceremony the rest of the pipeline applies.
+
+**How to estimate:** Count the lines of production code you expect to add or modify (exclude
+tests, docs, config). Use your approach from Step 3b as the basis — you know the fix by now.
+
+| Tier | Estimated src lines | Files touched | Pipeline adjustments |
+|------|-------------------|---------------|---------------------|
+| **Light** | < 30 lines | ≤ 3 files | Inline tests (skip test-author agent), skip evaluator, /diag on src/ only |
+| **Standard** | 30–150 lines | any | Full pipeline as documented |
+| **Heavy** | 150+ lines | any | Full pipeline, consider splitting into sub-issues |
+
+**Bug fixes default to Light** unless the fix is genuinely complex (multi-file refactor,
+new module, schema change). A 3-line query fix does not need a 256-line test file from
+a sub-agent.
+
+State the tier and reasoning in one line before proceeding:
+> **Pressure: Light** — 3-line query filter change in one file.
+
+### Step 4: Implement with test authorship
+
+The approach depends on the **pressure tier** set in Step 3c.
+
+---
+
+#### Light pressure path (< 30 src lines, bug fixes)
+
+No sub-agents. Write the fix and regression tests in one pass.
+
+1. **Write the fix** directly in the source file.
+2. **Write 2–5 focused regression tests** in the target test file. Each test should:
+   - Reference the issue number in a comment or test name
+   - Test through the public interface, not internals
+   - Include at least one test that would fail on the pre-fix behaviour (for bug fixes)
+   - Match the style of neighbouring test files (grep for sibling tests first)
+3. **Run the target test file** to confirm tests pass:
+   ```bash
+   bash scripts/pytest-summary.sh <test-file>
+   ```
+   This emits a single compact line (`PASS N/N -- Xs` or `FAIL N/N ...`) without launching a sub-agent.
+4. Proceed directly to Step 5 (full verification).
+
+**Do not** launch the test-author or feature-evaluator agents.
+
+---
+
+#### Standard / Heavy pressure path (≥ 30 src lines, new features)
+
+Tests must be written by a separate agent against the spec only, before implementation.
 
 The flow is four sub-steps: interface → independent tests → implementation → green.
 
@@ -75,6 +131,7 @@ Input:
   target_test_file: <tests/.../<test_unit>.py>
   unit_under_test: <src/recall/.../<unit>.py>
   mode: "feature" | "bugfix"
+  pressure: "standard"
 ```
 
 For `requirements_paths`: pass the project requirements doc plus any per-feature
@@ -174,25 +231,28 @@ Do not proceed to Step 6 with unguarded except blocks.
 
 ### Step 6: Diagnostics (blocking gate)
 
-Run `/diag` on all files changed in this cycle. This is a **blocking gate** — do not proceed to Step 7 until clean.
+Run `/diag` on changed files. This is a **blocking gate** — do not proceed to Step 7 until clean.
 
-**Both `src/` and `tests/` files must be checked.** Analysers flag Code Duplication in test
-files (repeated fixtures, repeated arrange/act/assert scaffolding). These warnings are
-blocking — fix them before proceeding to Step 7.
+**Scope depends on pressure tier:**
+
+- **Light:** Run `/diag` on changed `src/` files only. Skip diagnostics on test files — they add cost for low-value findings on small test additions.
+- **Standard / Heavy:** Run `/diag` on all changed files — including every modified test file under `tests/`. Analysers flag Code Duplication in test files (repeated fixtures, repeated arrange/act/assert scaffolding). These warnings are blocking — fix them before proceeding to Step 7.
 
 Then:
 
-1. Run `/diag` on all changed files — including every modified test file under `tests/`.
+1. Run `/diag` on the scoped file set.
 2. If any findings exist, fix them all.
 3. After fixing, re-run `/diag` to confirm the findings are gone — do not assume a fix worked without seeing the updated diagnostics.
-4. Repeat until `/diag` reports zero findings.
+4. Repeat until `/diag` reports zero findings on non-generated files.
 5. Re-run Step 5 (full verification) after any fixes.
 
 Only proceed to Step 6b when `/diag` reports zero findings on non-generated files.
 
-### Step 6b: Evaluate (blocking gate)
+### Step 6b: Evaluate (pressure-gated)
 
-Launch the `feature-evaluator` agent as a sub-agent. Its primary job is now a *coverage
+**Light pressure: skip.** Proceed to Step 7.
+
+**Standard / Heavy pressure:** Launch the `feature-evaluator` agent as a sub-agent. Its primary job is now a *coverage
 audit*, not a test factory — Step 4b already produced independent tests, so the
 evaluator's role is to confirm that the contract is fully covered and probe for genuine
 gaps only.
@@ -306,6 +366,10 @@ Summarise what was done:
 - CI outcome: pass / fail / pending (if the ci-probe has not yet reported back)
 - Any warnings or notes (PR size, diagnostics findings, design drift)
 - Suggested next item from the board
+
+### Step 10b: Compact
+
+Run `/compact` immediately after the Step 10 report — while the cache is still warm.
 
 **Stop here.** User reviews the PR. Post-PR workflow (merge, close, board update) is handled by `/feature-end`.
 
