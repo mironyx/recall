@@ -6,7 +6,7 @@
 
 ## Context
 
-Recall has a small, well-bounded schema: the `store` and `store_vectors` tables owned by `AsyncPostgresStore` (shape fixed by ADR-0001 and ADR-0002), and the `projects` table from ADR-0009. That is three tables total, two of which are created by upstream code we do not control.
+Recall has a small, well-bounded schema: the `store` and `store_vectors` tables owned by `AsyncPostgresStore` (shape fixed by ADR-0001 and ADR-0002), plus the scope CHECK constraint added by this server. Both tables are created by upstream code we do not control.
 
 The original ADR-0013 chose an in-app DDL runner: numbered SQL files, a `schema_migrations` ledger table, advisory locking, concurrency retry loops, and file-discovery machinery. When implemented, this produced ~140 lines of runner code, ~580 lines of tests, and a maintenance surface disproportionate to the problem: applying two idempotent DDL statements on top of `AsyncPostgresStore.setup()`.
 
@@ -21,7 +21,6 @@ Recall uses **idempotent DDL executed on startup** instead of a migration framew
 - A single async function `ensure_schema(conn_string)` that:
   1. Calls `AsyncPostgresStore.setup()` — creates `store`, `store_vectors`, and their internal migration ledgers. This is the upstream contract and is non-negotiable.
   2. Adds the scope CHECK constraint on the `store` table (ADR-0001, ADR-0002) using a `DO $$ ... EXCEPTION WHEN duplicate_object` block for idempotency.
-  3. Creates the `projects` table with `CREATE TABLE IF NOT EXISTS` (ADR-0009).
 - `recall db migrate` calls `ensure_schema`. Name kept for operator familiarity.
 - `recall serve` calls `ensure_schema` on startup unless `RECALL_DB_MIGRATE_ON_STARTUP=false`.
 - The integration test fixture calls the same `ensure_schema` function.
@@ -58,5 +57,5 @@ When a schema change is needed in the future (new column, new index), we will ev
 - docs/design/v2-design.md — Migrations component
 - ADR-0001 (flat value schema): the CHECK constraint enforces this
 - ADR-0002 (namespace shape): the scope invariant
-- ADR-0009 (projects table): created by `ensure_schema`
+- ADR-0009 (superseded by ADR-0014): projects table deferred
 - ADR-0012 (test strategy): integration test fixture calls `ensure_schema`
