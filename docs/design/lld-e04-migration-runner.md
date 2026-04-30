@@ -7,9 +7,11 @@
 | Parent epic | #72 — E0: Phase 0: Foundation |
 | Task issue | #76 — E0.4: Migration runner and initial schema |
 | HLD components | Migration Runner, CLI |
-| ADRs | ADR-0001, ADR-0002, ADR-0009, ADR-0013 (revised) |
-| Status | Draft |
+| ADRs | ADR-0001, ADR-0002, ADR-0013 (revised), ADR-0014 |
+| Version | 0.2 |
+| Status | Revised |
 | Date | 2026-04-22 (rewrite of 2026-04-12 original) |
+| Revised | 2026-04-30 | Issue #76 |
 
 ---
 
@@ -37,7 +39,6 @@ sequenceDiagram
     Store->>DB: CREATE TABLE IF NOT EXISTS store, store_vectors, ...
     Store-->>ES: done
     ES->>DB: DO $$ ALTER TABLE store ADD CONSTRAINT ... EXCEPTION WHEN duplicate_object $$
-    ES->>DB: CREATE TABLE IF NOT EXISTS projects (...)
     ES-->>CLI: done
 ```
 
@@ -77,7 +78,7 @@ graph LR
 |---|-----------|-------------|
 | I1 | Running `ensure_schema` twice is idempotent — second run changes nothing | Integration test: call twice, second succeeds without error |
 | I2 | `scope=global` requires `project_id='_'`; `scope=project` requires `project_id != '_'` | Integration test: INSERT violating CHECK raises |
-| I3 | `lower(id) = 'global'` rejected in projects table | Integration test: INSERT 'Global' into projects raises |
+| I3 | ~~`lower(id) = 'global'` rejected in projects table~~ — _(deferred → ADR-0014)_ | — |
 | I4 | After `ensure_schema`, `AsyncPostgresStore.aput` succeeds | Integration test: aput after ensure_schema works |
 
 ### Acceptance Criteria + BDD Specs
@@ -111,18 +112,11 @@ class TestScopeConstraint:
     async def test_happy_path_global(self, migrated_db: str) -> None:
         """INSERT with prefix='global._' succeeds."""
 
+    async def test_constraint_exists(self, migrated_db: str) -> None:
+        """Named CHECK constraint 'store_scope_invariant' is registered in information_schema."""
 
-class TestProjectsTable:
-    """Integration tests for the projects table."""
 
-    async def test_projects_table_created(self, migrated_db: str) -> None:
-        """After ensure_schema, the projects table exists with expected columns."""
-
-    async def test_global_name_rejected(self, migrated_db: str) -> None:
-        """INSERT with id='Global' (any case) violates CHECK."""
-
-    async def test_valid_project_accepted(self, migrated_db: str) -> None:
-        """INSERT with id='my-project' succeeds."""
+# TestProjectsTable — deferred → ADR-0014 (projects table dropped)
 
 
 class TestCliDbMigrate:
@@ -186,15 +180,7 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 """
 
-_PROJECTS_TABLE_SQL = """\
-CREATE TABLE IF NOT EXISTS projects (
-    id           text PRIMARY KEY,
-    display_name text NOT NULL,
-    created_at   timestamptz NOT NULL DEFAULT now(),
-    created_by   text NOT NULL,
-    CONSTRAINT projects_no_global CHECK (lower(id) != 'global')
-);
-"""
+# _PROJECTS_TABLE_SQL — removed (deferred → ADR-0014)
 
 
 def _phase0_index_config() -> PostgresIndexConfig:
@@ -213,7 +199,6 @@ async def ensure_schema(conn_string: str) -> None:
 
     1. AsyncPostgresStore.setup() — store + store_vectors.
     2. Scope CHECK constraint on store table.
-    3. Projects table.
     """
     async with AsyncPostgresStore.from_conn_string(
         conn_string, index=_phase0_index_config()
@@ -224,8 +209,9 @@ async def ensure_schema(conn_string: str) -> None:
         conn_string, autocommit=True
     ) as conn:
         await conn.execute(_SCOPE_CHECK_SQL)
-        await conn.execute(_PROJECTS_TABLE_SQL)
 ```
+
+> **Implementation note (issue #76):** Step 3 (projects table creation) was removed per ADR-0014. `ensure_schema` now creates only `store`, `store_vectors`, and the scope CHECK constraint. The `projects` table and its `CHECK (lower(id) != 'global')` constraint are deferred; projects are inferred from `store.prefix` instead.
 
 #### `src/recall/cli.py`
 
@@ -264,3 +250,5 @@ store is usable).
 - `src/recall/migrations/` — entire directory, no longer needed
 - `tests/test_migrations.py` — replaced by `test_schema.py`
 - `tests/evaluation/test_e04_migration_runner_eval.py` — no longer applicable
+
+> **Implementation note (issue #76):** No projects-related files were created. The `projects` table, the `recall projects` CLI subgroup, and `TestProjectsTable` tests are all deferred per ADR-0014.
