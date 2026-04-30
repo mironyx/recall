@@ -88,7 +88,7 @@ In both cases:
 - **Check review status:** `gh pr view <number> --json reviewDecision --jq .reviewDecision`. If the result is `CHANGES_REQUESTED`, stop and report per the Blocker policy. (Empty/null or `APPROVED` are fine — repos without required reviews will return empty.)
 - Read the latest session log in `docs/sessions/` to understand what has been done this session. **Skip this in crash recovery mode** (`OLD_SESSION_ID` set) — the JSONL read in Step 2 provides the implementation history instead.
 
-### Step 1.5: Sync the LLD — MANDATORY
+### Step 1.5: Sync the LLD (pressure-adaptive)
 
 **Idempotency check:** Before running, check whether lld-sync was already completed this run:
 ```bash
@@ -96,9 +96,17 @@ git log --oneline origin/main..HEAD | grep -i "lld-sync\|lld sync" | head -1
 ```
 If a matching commit exists, skip this step and note "lld-sync already committed" in the session log.
 
-Otherwise run `/lld-sync <issue-number>` to update the Low-Level Design document with
-implementation learnings before writing the session log. The sync report feeds directly into the
-session log's "Decisions made" section.
+**Classify the change size** to decide whether a full lld-sync is warranted:
+```bash
+git diff --stat origin/main...HEAD -- 'src/**' | tail -1
+```
+
+- **Small change (< 30 src lines, bug fix, no new exports):** Skip lld-sync. Note in the
+  session log: "lld-sync skipped — small bug fix, no architectural change." The LLD was
+  already updated inline during the feature-core cycle if needed.
+- **Medium/large change (≥ 30 src lines, new functions, new modules):** Run `/lld-sync
+  <issue-number>` to update the LLD with implementation learnings. The sync report feeds
+  into the session log's "Decisions made" section.
 
 Only skip if no LLD covers this issue (chore or infrastructure task) — note the skip in the
 session log.
@@ -170,6 +178,9 @@ COST_OUTPUT=$(.claude/hooks/run-python.sh scripts/query-feature-cost.py RECALL-$
 echo "$COST_OUTPUT"
 ```
 
+**If the command runs as a background task**, use the **Read tool** to read the output file —
+never `cat`, which can silently produce empty output on some platforms.
+
 Post the output as a PR comment:
 
 ```bash
@@ -231,6 +242,19 @@ git merge-base --is-ancestor "origin/$BASE" HEAD \
 - **Already up to date** (`ALREADY_UP_TO_DATE`) → proceed directly to Step 4.
 - **Rebased cleanly** (`REBASED_AND_PUSHED`) → proceed to Step 4. CI will re-run on the rebased commit; wait for it to pass before merging (use `gh run watch`).
 - **Rebase conflict** (non-zero exit from `git rebase`) → run `git rebase --abort`, stop, and report the conflicting files to the user. Do not attempt to resolve conflicts automatically.
+
+### Step 3.7: Switch CWD to main repo (worktree mode only)
+
+**If running inside a linked worktree** (`IS_WORKTREE = "yes"` from Step 5+6 detection), switch the shell's working directory to the main repo **now, before the merge**, in a dedicated Bash call:
+
+```bash
+MAIN_REPO=$(dirname "$(git rev-parse --git-common-dir)")
+cd "$MAIN_REPO"
+```
+
+This must be a **separate** Bash call. The Bash tool retains CWD between calls, so all subsequent calls will start from the main repo. This prevents every post-merge Bash call from failing with "path does not exist" when git auto-prunes the worktree after the remote branch is deleted on squash-merge.
+
+Skip this step if already in the main repo (`IS_WORKTREE = "no"`).
 
 ### Step 4: Merge the PR
 

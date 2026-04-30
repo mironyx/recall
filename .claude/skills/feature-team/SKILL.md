@@ -141,8 +141,8 @@ Each teammate receives this self-contained prompt (fill in the placeholders):
 >    ```bash
 >    SLUG=<slug-from-title>
 >    git fetch origin main
->    git worktree add ../fcs-feat-<N>-$SLUG -b feat/$SLUG origin/main
->    cd ../fcs-feat-<N>-$SLUG
+>    git worktree add ../recall-feat-<N>-$SLUG -b feat/$SLUG origin/main
+>    cd ../recall-feat-<N>-$SLUG
 >    ```
 > 1a. Symlink gitignored local files from the main repo so integration tests work:
 >    ```bash
