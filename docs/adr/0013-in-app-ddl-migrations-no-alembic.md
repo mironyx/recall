@@ -1,65 +1,61 @@
-# 0013. Schema migrations: in-app DDL runner for v1, no Alembic
+# 0013. Schema setup: idempotent DDL on startup, no migration framework
 
-**Date:** 2026-04-10
-**Status:** Accepted
+**Date:** 2026-04-10 (revised 2026-04-22)
+**Status:** Accepted (supersedes original ADR-0013)
 **Deciders:** LS / Claude
 
 ## Context
 
-Recall has a single Postgres database and a small, well-bounded schema: the memories table backing `AsyncPostgresStore` (shape fixed by ADR-0001 and ADR-0002), the `projects` table from ADR-0009, and whatever indexes those need. The schema will evolve — pgvector index types change, new columns get added for compaction metadata, the access-time column for the prune-unread pass (S6.7) does not exist yet — but it will not evolve fast, and it will never have a hundred tables.
+Recall has a small, well-bounded schema: the `store` and `store_vectors` tables owned by `AsyncPostgresStore` (shape fixed by ADR-0001 and ADR-0002), plus the scope CHECK constraint added by this server. Both tables are created by upstream code we do not control.
 
-The Migrations component (HLD Level 2) needs a concrete mechanism. The two realistic choices are:
+The original ADR-0013 chose an in-app DDL runner: numbered SQL files, a `schema_migrations` ledger table, advisory locking, concurrency retry loops, and file-discovery machinery. When implemented, this produced ~140 lines of runner code, ~580 lines of tests, and a maintenance surface disproportionate to the problem: applying two idempotent DDL statements on top of `AsyncPostgresStore.setup()`.
 
-1. **A grown-up migration framework** — Alembic is the obvious one in Python.
-2. **An in-app DDL runner** — a directory of numbered SQL files, a `schema_migrations` table that records which have been applied, and a small piece of Python that walks the directory and applies anything new inside a single transaction.
+Additional context: we are evaluating Supabase as a deployment target (container for small teams, cloud for larger installations). Supabase is Postgres + pgvector and is compatible with `AsyncPostgresStore`, but introducing our own migration framework makes a future Supabase migration harder — it is one more thing to reconcile or rip out.
 
-Alembic is the right answer for a service with thirty tables, fifteen contributors, and a long migration history. Recall is none of those things. The cost of Alembic is real: an extra dependency, an `alembic.ini`, an `env.py`, autogeneration that frequently produces wrong migrations against pgvector columns, a separate `alembic upgrade head` step that has to be wired into every entrypoint and every test fixture, and a mental model contributors need to learn before they can add a column.
-
-S5.5 says migrations "run automatically on startup behind a flag, or via an explicit CLI command". S1.9 mandates `recall db migrate`. The HLD's Migrations component is built around a single component owning DDL — there is no separate "migrations service".
-
-We need to decide before any code lands, because the test fixture (ADR-0012) needs to call into the migration runner on every container boot, and that integration is much simpler if the runner is a single Python function we own.
+The schema will evolve slowly. When it does, the right response is to evaluate what tooling is needed at that point — not to pre-build a framework for a future that may never arrive.
 
 ## Decision
 
-Recall v1 ships its own **in-app DDL runner**. The shape is deliberately small:
+Recall uses **idempotent DDL executed on startup** instead of a migration framework. The shape is minimal:
 
-- Migrations live in `src/recall/migrations/` as numbered SQL files: `0001_initial.sql`, `0002_projects.sql`, …. Each file is a single SQL script that runs inside one transaction. Filename ordering is the apply order.
-- A `schema_migrations(version text primary key, applied_at timestamptz not null default now())` table records which migrations have been applied. The runner creates this table itself if it does not exist.
-- The runner is a pure Python function: `apply_pending(connection) -> list[str]`. It locks the `schema_migrations` table (`LOCK TABLE ... IN ACCESS EXCLUSIVE MODE`), reads applied versions, walks the migrations directory, applies anything not yet applied in filename order inside a single transaction per file, and inserts the version row on success. On failure, the transaction rolls back and the runner raises — partial application is impossible.
-- `recall db migrate` is a thin CLI wrapper around `apply_pending`.
-- `recall serve` runs `apply_pending` automatically on startup unless `RECALL_DB_MIGRATE_ON_STARTUP=false`. The default is **on**, because the audience is small teams who deploy by `docker compose up` and would rather have migrations "just happen".
-- The integration test fixture (ADR-0012) calls the same `apply_pending` against the testcontainers Postgres before any test runs. There is exactly one migration code path.
-- Down-migrations are **not** supported in v1. Rolling back means restoring from backup. We can revisit if real demand appears.
+- A single async function `ensure_schema(conn_string)` that:
+  1. Calls `AsyncPostgresStore.setup()` — creates `store`, `store_vectors`, and their internal migration ledgers. This is the upstream contract and is non-negotiable.
+  2. Adds the scope CHECK constraint on the `store` table (ADR-0001, ADR-0002) using a `DO $$ ... EXCEPTION WHEN duplicate_object` block for idempotency.
+- `recall db migrate` calls `ensure_schema`. Name kept for operator familiarity.
+- `recall serve` calls `ensure_schema` on startup unless `RECALL_DB_MIGRATE_ON_STARTUP=false`.
+- The integration test fixture calls the same `ensure_schema` function.
+- There is **no `schema_migrations` table**, no advisory locks, no file discovery, no numbered SQL files.
 
-`AsyncPostgresStore`'s own `setup()` call (which creates its internal tables) is invoked from within the relevant migration file, not as a parallel mechanism. There is one place schema changes happen.
+When a schema change is needed in the future (new column, new index), we will evaluate at that point whether to:
+- Extend `ensure_schema` with another idempotent statement.
+- Adopt a lightweight migration tool (dbmate, Supabase migrations, etc.).
+- Write a one-shot migration script.
 
 ## Consequences
 
 **Positive.**
-- One mechanism, ~50 lines of Python, no external dependency.
-- The test fixture, the CLI, and the server startup all hit the same function — there is no "ran in tests but not in prod" failure mode.
-- Reviewers can read a migration as plain SQL, no autogen guessing.
-- pgvector DDL (`CREATE INDEX ... USING hnsw (embedding vector_cosine_ops)`) is written as the operator wants it, not as Alembic infers it.
-- "Add a column" is: write a SQL file, commit, done.
+- ~30 lines of production code instead of ~140. ~100 lines of tests instead of ~580.
+- One function, no framework. Nothing to maintain.
+- Supabase-compatible: if we move to Supabase, we drop `ensure_schema` and manage DDL in Supabase's dashboard/migrations. No framework to rip out.
+- The test fixture, the CLI, and the server startup all hit the same function.
+- Reviewers can read the DDL inline — no indirection through SQL files.
 
 **Negative / accepted trade-offs.**
-- **No down-migrations.** Accepted. Down-migrations are usually wrong anyway; restore-from-backup is the honest recovery path for anything that touches data.
-- **No autogeneration from SQLAlchemy models.** Recall does not use SQLAlchemy. There is nothing to autogenerate from.
-- **No schema diffing tooling.** If a future contributor wants `migra` or `pgsanity`, they can run it locally; we do not bake it into CI in v1.
-- **The in-app runner is one more thing we own.** Real, but small enough that the maintenance cost is dwarfed by the cost of Alembic ceremony.
-- **`MIGRATE_ON_STARTUP=true` by default** means a misbehaving migration takes the whole startup down. That is the right failure mode — the alternative is silently running on a wrong schema. The flag exists so operators with formal change management can disable it.
+- **No migration ordering or history.** Accepted. With 2 idempotent statements there is nothing to order or track.
+- **No down-migrations.** Same as the original ADR — restore from backup.
+- **If we accumulate many schema changes, idempotent DDL stops scaling.** Accepted. We will adopt proper tooling when that happens, not before.
+- **`ensure_schema` re-runs all DDL on every startup.** Acceptable. The statements are `IF NOT EXISTS` / `EXCEPTION WHEN duplicate_object` — they are no-ops on an already-correct schema. The cost is negligible.
 
 **Not chosen, and why.**
-- **Alembic.** Right tool, wrong scale. The ceremony tax is paid on every contributor onboarding and every test fixture invocation, in exchange for features (autogen, branching, down-migrations) Recall does not use.
-- **`yoyo-migrations` or `dbmate`.** Smaller than Alembic, but still an external dependency for a problem that is genuinely 50 lines of Python.
-- **Hand-applied DDL via runbook.** Drift between environments by Tuesday.
-- **Schema embedded in application startup with `CREATE TABLE IF NOT EXISTS`.** Works for the first version. Falls over the moment a column needs to be added to existing data.
+- **In-app DDL runner (original ADR-0013).** Over-engineered for the current schema size. Maintenance cost exceeded the cost of the problem it solved.
+- **Alembic.** Still wrong scale. Same reasoning as the original ADR.
+- **dbmate / yoyo-migrations.** External dependency for a problem that is currently ~30 lines of Python.
 
 ## References
 
-- REQUIREMENTS.md — S1.9, S5.5
-- docs/design/v1-design.md — Migrations component; Operator CLI
-- ADR-0001 (flat value schema): the shape the initial migration creates
-- ADR-0002 (namespace shape): the index that initial migration must create
-- ADR-0009 (projects table): the second migration file
-- ADR-0012 (test strategy): the integration test fixture is the primary user of `apply_pending`
+- REQUIREMENTS.md — S6.2 (database migrations story)
+- docs/design/v2-design.md — Migrations component
+- ADR-0001 (flat value schema): the CHECK constraint enforces this
+- ADR-0002 (namespace shape): the scope invariant
+- ADR-0009 (superseded by ADR-0014): projects table deferred
+- ADR-0012 (test strategy): integration test fixture calls `ensure_schema`

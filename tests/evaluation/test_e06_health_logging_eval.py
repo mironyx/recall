@@ -70,19 +70,17 @@ class TestI3NoRawOutput:
         sys.stderr.write() on a warning is a silent escape hatch that will not
         appear in structured JSON output collected by the log aggregator.
         """
-        import subprocess
         from pathlib import Path
 
         src_dir = Path(__file__).parent.parent.parent / "src" / "recall"
-        result = subprocess.run(
-            ["grep", "-rn", "sys.stderr.write", str(src_dir)],  # noqa: S607
-            capture_output=True,
-            text=True,
-        )
-        # If grep finds matches, the test fails and prints them.
-        assert result.stdout.strip() == "", (
+        hits: list[str] = []
+        for py_file in src_dir.rglob("*.py"):
+            for i, line in enumerate(py_file.read_text().splitlines(), 1):
+                if "sys.stderr.write" in line:
+                    hits.append(f"{py_file}:{i}: {line.strip()}")
+        assert not hits, (
             "Found sys.stderr.write() in src/recall/ — these bypass structlog "
-            f"and violate I3:\n{result.stdout}"
+            "and violate I3:\n" + "\n".join(hits)
         )
 
 
@@ -214,17 +212,20 @@ class TestNoPrintInSrc:
     """I3 — complement: no bare print() calls exist in src/recall/."""
 
     def test_no_print_calls_in_src(self) -> None:
-        """src/recall/ must contain no bare print() calls."""
-        import subprocess
+        """src/recall/ must contain no bare print() calls (cli.py excluded — CLI user output)."""
+        import re
         from pathlib import Path
 
         src_dir = Path(__file__).parent.parent.parent / "src" / "recall"
-        # grep for print( but exclude comments and string literals naively
-        result = subprocess.run(
-            ["grep", "-rn", r"^\s*print(", str(src_dir)],  # noqa: S607
-            capture_output=True,
-            text=True,
-        )
-        assert result.stdout.strip() == "", (
-            f"Found bare print() calls in src/recall/:\n{result.stdout}"
-        )
+        # cli.py is excluded: its print() calls are deliberate CLI user output,
+        # not logging that should route through structlog.
+        excluded = {"cli.py"}
+        pattern = re.compile(r"^\s*print\(", re.MULTILINE)
+        hits: list[str] = []
+        for py_file in src_dir.rglob("*.py"):
+            if py_file.name in excluded:
+                continue
+            for i, line in enumerate(py_file.read_text().splitlines(), 1):
+                if pattern.match(line):
+                    hits.append(f"{py_file}:{i}: {line.strip()}")
+        assert not hits, "Found bare print() calls in src/recall/:\n" + "\n".join(hits)

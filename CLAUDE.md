@@ -6,6 +6,7 @@
 - **Simplicity first.** Minimum code that solves the problem. No speculative features, abstractions, or error handling for impossible scenarios.
 - **Surgical changes.** Touch only what you must. Match existing style. Don't "improve" adjacent code. Every changed line should trace to the request.
 - **Goal-driven execution.** Transform tasks into verifiable goals. Write the failing test first, then make it pass.
+- **No re-reads.** Do not re-read a file already loaded in the current session. Reference it by path only.
 
 ## Recall — Focused MCP Memory Server
 

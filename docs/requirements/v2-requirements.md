@@ -451,11 +451,18 @@ Safe multi-tenant use across machines. Users are authenticated per request via s
 
 ### Story 5.3: Project configuration
 
+**Status: Deferred** (ADR-0014, 2026-04-29)
+
 **As an** operator,
 **I want to** register projects in a database table,
 **so that** agents can reference a known project ID and the system can validate it.
 
-**Acceptance Criteria:**
+**Deferred rationale:** For Phase-0 self-hosted deployments, explicit registration adds friction
+without meaningful safety. Projects are inferred from the `store.prefix` column. If multi-tenant
+validation (reject unknown project IDs) becomes necessary, this story should be reinstated with
+the schema and CLI design from ADR-0009 as the reference.
+
+**Original Acceptance Criteria** (deferred):
 
 - Given a project is registered in the `projects` table, when an agent passes that project ID on an MCP call, then the call succeeds.
 - Given a project ID that is not registered, when an agent passes it on an MCP call that requires a project, then the call is rejected with a structured error indicating the unknown project.
@@ -463,8 +470,6 @@ Safe multi-tenant use across machines. Users are authenticated per request via s
 - Given the `recall projects add` CLI command, when an operator runs it with an ID and display name, then the project is registered in the database.
 - Given the `recall projects list` CLI command, when an operator runs it, then all registered projects are listed.
 - Given the `recall projects remove` CLI command, when an operator runs it for a project with no stored memories, then the project is removed.
-
-**Notes:** Projects are sourced from a `projects` table in Postgres (ADR-0009). There is no config-file fallback. The Project Registry component caches the table and refreshes on a cache miss before rejecting, so a freshly-added project is usable without restart.
 
 ---
 

@@ -5,6 +5,17 @@ institutional memory of "things we've learned the hard way."
 
 Add new anti-patterns here as the team discovers them.
 
+## General
+
+- **DRY violation — duplicate store query or service logic.** A new service, helper, or
+  tool handler reimplements data-fetching or business logic that already exists in a
+  sibling module. Detected by: a new file that calls `AsyncPostgresStore` methods
+  (`asearch`, `aput`, `aget`, `adelete`) for the same purpose as an existing file without
+  importing from it.
+  Fix: extract the shared logic into a dedicated service or query module and import from
+  both call sites. Severity: **warn** — two diverging code paths for the same data,
+  maintenance burden, and risk of behavioural inconsistency.
+
 ## Storage namespace & scoping
 
 - **Widening the store namespace beyond `(scope, project_id)`** — e.g. prepending

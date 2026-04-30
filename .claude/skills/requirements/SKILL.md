@@ -30,6 +30,10 @@ it spawns. When launching agents, pass `model: "opus"`.
   addresses `[Review]` comments, and continues from where it stopped
 - `/requirements "Brief description of what needs building"` — works from a
   freeform prompt when no discovery doc exists
+- `/requirements #215` — reads a GitHub issue as the brief (tier-2 per
+  ADR-0022)
+- `/requirements #214,#215` — reads multiple issues as related features;
+  groups them into a single requirements doc
 
 ## When to use
 
@@ -48,6 +52,9 @@ minor updates, edit them directly rather than re-running this skill.
 - `docs/discovery/v{N}-discovery.md` — structured discovery document (preferred)
 - Freeform brief — a prompt argument describing what needs building (for
   smaller projects)
+- GitHub issue(s) — one or more issue numbers (`#215` or `#214,#215`). Fetched
+  via `gh issue view`. Multiple issues are treated as related features within a
+  single requirements doc.
 - Human feedback via `[Review]` inline comments in an existing requirements doc
 
 **Outputs:**
@@ -88,6 +95,10 @@ Execute these steps sequentially. Use `TodoWrite` to track progress.
 ### Step 1: Read inputs and orient
 
 1. Determine the input source:
+   - If `$ARGUMENTS` matches `#\d+` or a comma-separated list of `#\d+`,
+     treat as GitHub issue input. Run `gh issue view <number>` for each
+     issue to fetch title, body, and labels. Multiple issues are treated as
+     related features within a single requirements doc.
    - If `$ARGUMENTS` contains a file path, use that.
    - If `$ARGUMENTS` contains a quoted string or freeform text (not a file
      path), treat it as a brief.
@@ -96,6 +107,9 @@ Execute these steps sequentially. Use `TodoWrite` to track progress.
 2. Read the input fully. Extract:
    - **From a discovery doc:** vision, boundaries (Is / Is Not), personas,
      user journeys, feature catalogue, MVP sequencer.
+   - **From GitHub issues:** summary, proposed solution, scope, acceptance
+     criteria, related issues. Combine multiple issues into a unified
+     feature brief.
    - **From a freeform brief:** core concept, target users, stated
      constraints, known scope boundaries, any explicit non-goals.
 3. Check for an existing requirements doc
@@ -237,6 +251,8 @@ the rationale for the ordering.
 
 <One paragraph describing the epic's scope and why it's prioritised here.>
 
+<a id="REQ-<epic-slug>-<story-slug>"></a>
+
 ### Story 1.1: <Name>
 
 **As a** <role>,
@@ -247,6 +263,16 @@ the rationale for the ordering.
 
 ---
 ```
+
+**Slug derivation (per ADR-0026):**
+
+- `<epic-slug>`: lower-kebab-case of the epic name, e.g. `Epic 1: Project Management` →
+  `project-management`.
+- `<story-slug>`: lower-kebab-case of the story name, e.g. `Story 1.1: Create a project` →
+  `create-project`.
+- If two stories in the same epic produce the same slug, append `-2`, `-3` etc. and add an
+  HTML comment next to the anchor explaining the collision.
+- Emit one anchor per story. Do not add anchors to epic headings or sub-sections.
 
 **Mapping rules:**
 
@@ -482,7 +508,10 @@ After Gate 2 approval:
    git add docs/requirements/v{N}-requirements.md
    git commit -m "docs: finalise v{N} requirements"
    ```
-5. Report to the user: what was produced, key decisions, and suggested next
+5. Write a session log following `.claude/skills/shared/session-log.md`. Use
+   `<skill>=requirements` and `<slug>=v{N}` (or a scope-specific slug if the
+   session was a partial rewrite, e.g. `requirements-v2-e17-revision`).
+6. Report to the user: what was produced, key decisions, and suggested next
    step.
 
 **Stop here.** Do not proceed to `/kickoff` automatically.
@@ -522,6 +551,8 @@ Key conventions:
 - Epics are numbered sequentially: `## Epic 1:`, `## Epic 2:`
 - Stories use dotted numbering within their epic: `### Story 1.1:`,
   `### Story 1.2:`
+- Each story heading is preceded by a stable REQ- anchor:
+  `<a id="REQ-<epic-slug>-<story-slug>"></a>` (see ADR-0026)
 - ACs use Given/When/Then in bullet list format
 - Notes and technical mechanism sections appear after ACs where relevant
 - Cross-cutting concerns appear after all epics

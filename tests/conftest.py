@@ -1,16 +1,17 @@
 """Shared pytest fixtures for the Recall test suite.
 
-Session-scoped Postgres container (ADR-0012) and logging-reset helpers used
-by the health/logging tests. Tests that need a running container must be
-marked ``@pytest.mark.integration``.
+Session-scoped Postgres+pgvector container (ADR-0012), function-scoped
+clean-DB fixtures for schema tests, and logging-reset helpers.
+Tests that need a running container must be marked ``@pytest.mark.integration``.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Generator, Iterator
+from collections.abc import AsyncIterator, Generator, Iterator
 from typing import TYPE_CHECKING
 
+import psycopg
 import pytest
 
 if TYPE_CHECKING:
@@ -53,6 +54,51 @@ def postgres_dsn(postgres_container: PostgresContainer) -> str:
         scheme, rest = url.split("://", 1)
         url = f"{scheme.split('+')[0]}://{rest}"
     return url
+
+
+# ---------------------------------------------------------------------------
+# Function-scoped clean-DB fixtures for schema tests
+# ---------------------------------------------------------------------------
+
+_TABLES_TO_DROP = (
+    "store_vectors",
+    "store",
+    "store_migrations",
+    "vector_migrations",
+)
+
+
+async def _drop_all(conn_string: str) -> None:
+    """Drop every table that ensure_schema could have created."""
+    async with (
+        await psycopg.AsyncConnection.connect(conn_string, autocommit=True) as conn,
+        conn.cursor() as cur,
+    ):
+        for table in _TABLES_TO_DROP:
+            await cur.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+
+
+@pytest.fixture
+async def pg_conn(postgres_dsn: str) -> AsyncIterator[str]:
+    """Connection string pointing at a freshly-cleaned database.
+
+    Drops all schema tables before and after each test so every test
+    starts from a blank slate without paying container-boot cost.
+    """
+    await _drop_all(postgres_dsn)
+    try:
+        yield postgres_dsn
+    finally:
+        await _drop_all(postgres_dsn)
+
+
+@pytest.fixture
+async def migrated_db(pg_conn: str) -> str:
+    """A connection string for a database with ensure_schema already applied."""
+    from recall.db.schema import ensure_schema
+
+    await ensure_schema(pg_conn)
+    return pg_conn
 
 
 @pytest.fixture

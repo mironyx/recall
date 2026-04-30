@@ -1,7 +1,7 @@
 # 0009. Project registry sourced from a `projects` table
 
 **Date:** 2026-04-10
-**Status:** Accepted
+**Status:** Superseded by ADR-0014 (2026-04-29)
 **Deciders:** LS / Claude
 
 ## Context

@@ -36,10 +36,22 @@ def _run_cli(*args: str, timeout: int = 10) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _find_uv() -> str:
+    """Locate ``uv`` executable — check the venv Scripts dir first, then PATH."""
+    import shutil
+
+    venv_uv = _REPO_ROOT / ".venv" / ("Scripts" if sys.platform == "win32" else "bin") / "uv"
+    for candidate in [str(venv_uv), shutil.which("uv") or ""]:
+        if candidate and Path(candidate).exists():
+            return candidate
+    pytest.skip("uv not found")  # raises Skipped (NoReturn)
+
+
 def _run_entry_point(*args: str, timeout: int = 10) -> subprocess.CompletedProcess[str]:
     """Run via the installed `recall` script entry point."""
+    uv = _find_uv()
     return subprocess.run(
-        ["uv", "run", "recall", *args],  # noqa: S607
+        [uv, "run", "recall", *args],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -61,9 +73,10 @@ class TestEntryPointStubs:
         assert result.returncode == 0
 
     def test_db_migrate_via_entry_point(self) -> None:
-        """recall db migrate via installed entry point exits 0."""
+        """recall db migrate via installed entry point prints clean error without DATABASE_URL."""
         result = _run_entry_point("db", "migrate")
-        assert result.returncode == 0
+        assert "Traceback" not in result.stderr
+        assert "Traceback" not in result.stdout
 
 
 # ---------------------------------------------------------------------------

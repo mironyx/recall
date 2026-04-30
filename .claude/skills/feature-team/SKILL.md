@@ -26,6 +26,14 @@ For a single issue, use `/feature` instead. Epic issues (label `epic`) cannot be
 
 Execute these steps sequentially without pausing for confirmation.
 
+### Step 0: Pre-flight — ensure clean, up-to-date main
+
+```bash
+git checkout main && git pull origin main
+```
+
+If checkout fails due to uncommitted changes, stop and tell the user.
+
 ### Step 1: Parse arguments and collect issues
 
 If `epic <N>` is given:
@@ -99,12 +107,16 @@ Fetch it before proceeding or the call will fail with `InputValidationError`:
    teammates), the team was created but teammates were never spawned — proceed directly
    to step 2. If teammates are already present, do not recreate.
 
-2. Call `Agent` once per teammate, **all in the same message**, with `team_name` and
-   `name` set:
+2. Call `Agent` once per teammate, **all in the same message**, with `team_name`,
+   `name`, and **`model` set to the same model the lead is running on** (inherit — do
+   not let the agent definition override to a more expensive model):
    ```
-   Agent(team_name="feature-team-<issues>", name="teammate-<N>", run_in_background=true, prompt="...")
-   Agent(team_name="feature-team-<issues>", name="teammate-<M>", run_in_background=true, prompt="...")
+   Agent(team_name="feature-team-<issues>", name="teammate-<N>", model="sonnet", run_in_background=true, prompt="...")
+   Agent(team_name="feature-team-<issues>", name="teammate-<M>", model="sonnet", run_in_background=true, prompt="...")
    ```
+   Replace `"sonnet"` with whatever model the lead session is actually using (check
+   `/model` output). The `model` field overrides the agent definition's default and
+   ensures teammates run on the same model as the lead — not a more expensive one.
 
 Do **not** pass "Create a team with N teammates" as prose to the `Agent` tool — that
 syntax is not supported and will be echoed back as text rather than spawning teammates.
@@ -129,8 +141,8 @@ Each teammate receives this self-contained prompt (fill in the placeholders):
 >    ```bash
 >    SLUG=<slug-from-title>
 >    git fetch origin main
->    git worktree add ../fcs-feat-<N>-$SLUG -b feat/$SLUG origin/main
->    cd ../fcs-feat-<N>-$SLUG
+>    git worktree add ../recall-feat-<N>-$SLUG -b feat/$SLUG origin/main
+>    cd ../recall-feat-<N>-$SLUG
 >    ```
 > 1a. Symlink gitignored local files from the main repo so integration tests work:
 >    ```bash
