@@ -144,11 +144,11 @@ class _BashAccum:
 
 def _classify_bash(cmd: str, text: str, acc: _BashAccum) -> None:
     """Append to the appropriate accumulator based on what the Bash command did."""
-    if re.search(r"vitest\s+run", cmd):
+    if re.search(r"(vitest run|run-tests\.sh)", cmd):
         acc.vitest.append(_vitest_result(text))
-    elif re.search(r"tsc\s+--noEmit", cmd):
+    elif re.search(r"(tsc --noEmit|run-typecheck\.sh)", cmd):
         acc.tsc.append(_tsc_result(text))
-    elif re.search(r"npm run lint", cmd):
+    elif re.search(r"./scripts/run-lint.sh", cmd):
         acc.lint.append("issues" if ("error" in text.lower() or "warning" in text.lower()) else "clean")
     elif re.search(r"git commit", cmd):
         acc.commits.append(_git_commit_msg(cmd))

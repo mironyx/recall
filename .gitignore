@@ -55,5 +55,10 @@ htmlcov/
 /.remember
 .claude/settings.local.json
 
+# Quarantined local harness (plugin takes over)
+.claude/skills.local-backup/
+.claude/agents.local-backup/
+.claude/hooks.local-backup/
+
 # Local docs scratch
 /local-docs

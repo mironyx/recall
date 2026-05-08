@@ -44,17 +44,25 @@ A small, focused MCP server that gives coding agents persistent memory across se
 - **LLDs per task.** `docs/design/lld-<epic-slug>-<task-slug>.md`.
 - **Small PRs.** One logical change per PR.
 
-## Common commands
+## Verification (script contract)
+
+Skills and agents invoke these scripts. Each project provides its own implementation.
+
+| Script | Purpose |
+|---|---|
+| `./scripts/run-tests.sh` | Run unit tests; optional file path arg |
+| `./scripts/run-typecheck.sh` | Type check (`mypy --strict`) |
+| `./scripts/run-lint.sh` | Lint (`ruff check`) |
+| `./scripts/run-build.sh` | Build (N/A — `exec true`) |
+| `./scripts/run-markdown-lint.sh` | Markdown lint |
+| `./scripts/run-format-check.sh` | Format check (`ruff format --check`) |
+| `./scripts/run-e2e.sh` | E2E (N/A — `exec true`) |
+
+## Operational commands
 
 ```bash
 uv sync --extra dev              # Install / sync deps
 uv run recall serve              # Run server locally
-uv run ruff check .              # Lint
-uv run ruff format .             # Format
-uv run mypy                      # Type-check
-uv run pytest                    # All tests
-uv run pytest -m "not integration"  # Unit only
-uv run pytest -m integration     # Integration only
 uv run recall db migrate         # Database migrations
 ```
 
@@ -83,7 +91,16 @@ Read these before touching storage or memory-tool wiring:
 
 - [langmem-notes.md](docs/reference/langmem-notes.md) — LangMem tools, namespace templating, store wiring.
 - [asyncpostgresstore-notes.md](docs/reference/asyncpostgresstore-notes.md) — schema DDL, API, filter operators, gotchas.
-- [docs/adr/](docs/adr/) — All architectural decisions (ADR-0001 through ADR-0013).
+- [docs/adr/](docs/adr/) — All architectural decisions (ADR-0001 through ADR-0014).
+
+## Knowledge base (kb/)
+
+Project-specific conventions used by plugin skills and agents:
+
+- [kb/architecture.md](kb/architecture.md) — Boundary rules, composition pattern
+- [kb/file-map.md](kb/file-map.md) — Concept → path mapping
+- [kb/conventions.md](kb/conventions.md) — Test naming and file conventions
+- [kb/anti-patterns.md](kb/anti-patterns.md) — Project-specific anti-pattern checklist
 
 ## Process
 
