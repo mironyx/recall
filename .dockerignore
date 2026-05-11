@@ -1,0 +1,47 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Tests & coverage
+tests/
+.coverage
+htmlcov/
+.coverage.*
+
+# CI / tooling
+.github/
+.claude/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Docs (not needed at runtime)
+docs/
+kb/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
