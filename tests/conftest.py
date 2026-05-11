@@ -1,22 +1,32 @@
 """Shared pytest fixtures for the Recall test suite.
 
 Session-scoped Postgres+pgvector container (ADR-0012), function-scoped
-clean-DB fixtures for schema tests, and logging-reset helpers.
-Tests that need a running container must be marked ``@pytest.mark.integration``.
+clean-DB fixtures for schema tests, session-scoped store fixture with stub
+embeddings (ADR-0008), per-test TRUNCATE isolation (E0.5), and logging-reset
+helpers. Tests that need a running container must be marked
+``@pytest.mark.integration``.
 """
 
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import AsyncIterator, Generator, Iterator
 from typing import TYPE_CHECKING
 
 import psycopg
 import pytest
+import pytest_asyncio
 
 if TYPE_CHECKING:
     # testcontainers ships without a py.typed marker; silence mypy's import-untyped check.
     from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
+
+# psycopg async requires a selector-based event loop on Windows.
+if sys.platform == "win32":
+    import asyncio
+
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +119,61 @@ def bad_dsn() -> str:
     will raise ``OSError``/``ConnectionError`` without any mocking.
     """
     return "postgresql://nouser:nopass@127.0.0.1:1/nodb"
+
+
+# ---------------------------------------------------------------------------
+# E0.5 — Session-scoped store + per-test TRUNCATE (ADR-0012, ADR-0008)
+# ---------------------------------------------------------------------------
+
+_TRUNCATE_TABLES = ("store", "store_vectors")
+
+
+async def _truncate_all(conn_string: str) -> None:
+    """Truncate data tables between tests."""
+    async with await psycopg.AsyncConnection.connect(conn_string, autocommit=True) as conn:
+        await conn.execute(f"TRUNCATE {', '.join(_TRUNCATE_TABLES)} CASCADE")
+
+
+@pytest.fixture(scope="session")
+def pg_conn_string(postgres_dsn: str) -> str:
+    """Alias for ``postgres_dsn`` — the session's Postgres connection string."""
+    return postgres_dsn
+
+
+@pytest_asyncio.fixture(scope="session")
+async def _migrated_db_sess(pg_conn_string: str) -> None:
+    """Run ``ensure_schema`` once per test session (E0.5 contract)."""
+    from recall.db.schema import ensure_schema
+
+    await ensure_schema(pg_conn_string)
+
+
+@pytest_asyncio.fixture(scope="session")
+async def _store_session(pg_conn_string: str, _migrated_db_sess: None) -> AsyncIterator[None]:
+    """Session-scoped marker — ``_migrated_db_sess`` ensures schema is ready."""
+    yield
+
+
+@pytest_asyncio.fixture
+async def store(pg_conn_string: str, _store_session: None) -> AsyncIterator[object]:
+    """Per-test store fixture. TRUNCATEs data tables, yields an AsyncPostgresStore
+    backed by the StubEmbeddingsProvider (ADR-0008)."""
+    from collections.abc import Sequence
+
+    from langgraph.store.postgres import AsyncPostgresStore
+    from langgraph.store.postgres.base import PostgresIndexConfig
+
+    from recall.embeddings.stub import StubEmbeddingsProvider
+
+    await _truncate_all(pg_conn_string)
+    stub = StubEmbeddingsProvider()
+
+    def _embed(texts: Sequence[str]) -> list[list[float]]:
+        return stub.embed(list(texts))
+
+    config = PostgresIndexConfig(dims=stub.dim, embed=_embed)
+    async with AsyncPostgresStore.from_conn_string(pg_conn_string, index=config) as s:
+        yield s
 
 
 # ---------------------------------------------------------------------------
