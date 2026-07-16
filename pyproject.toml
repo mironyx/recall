@@ -9,7 +9,7 @@ authors = [{ name = "Leonid" }]
 
 dependencies = [
     # Pinned loosely; lock via uv.lock
-    "mcp>=1.0",                       # MCP server SDK
+    "mcp>=1.28.1",                       # MCP server SDK
     "langgraph>=0.2",                 # AsyncPostgresStore + namespace API
     "langgraph-checkpoint-postgres",  # Postgres backend for langgraph store
     "asyncpg>=0.29",
