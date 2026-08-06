@@ -23,3 +23,8 @@ Maximum 6 MCP tools. Tool design is prompt design — each tool must be broad en
 ## Test strategy (ADR-0012)
 
 Integration tests hit real Postgres via testcontainers. Never mock the database. Unit tests for pure logic only; any code touching storage goes through integration tests.
+
+Deterministic test embeddings live in `src/recall/embeddings/stub.py`
+(`StubEmbeddingsProvider`), wired into the `store` fixture's index config via
+`PostgresIndexConfig(dims=..., embed=_embed)`. Reuse it for index-backed tests
+instead of re-implementing a stub embedder.

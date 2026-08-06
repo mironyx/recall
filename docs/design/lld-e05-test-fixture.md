@@ -8,8 +8,10 @@
 | Task issue | #77 — E0.5: Real-Postgres test fixture |
 | HLD components | Cross-cutting test infrastructure |
 | ADRs | ADR-0008, ADR-0012, ADR-0013 |
-| Status | Draft |
+| Version | 0.2 |
+| Status | Revised |
 | Date | 2026-04-12 |
+| Revised | 2026-08-06 | Issue #77 |
 
 ---
 
@@ -29,14 +31,14 @@ sequenceDiagram
     participant Pytest as pytest
     participant TC as testcontainers
     participant PG as Postgres+pgvector
-    participant MR as apply_pending
+    participant MR as ensure_schema
     participant Store as AsyncPostgresStore
 
     Pytest->>TC: start container (session scope)
     TC->>PG: boot Postgres with pgvector extension
     TC-->>Pytest: conn_string
-    Pytest->>MR: apply_pending(conn_string)
-    MR->>PG: run all migrations
+    Pytest->>MR: ensure_schema(conn_string)
+    MR->>PG: apply idempotent DDL
     MR-->>Pytest: ok
     Pytest->>Store: from_conn_string(conn_string, index=stub_config)
     Store-->>Pytest: store instance
@@ -58,7 +60,7 @@ graph LR
         Smoke["test_smoke.py"]
     end
     subgraph "src/recall/"
-        MR["db/migrations.py"]
+        MR["db/schema.py"]
         Embed["embeddings/stub.py"]
     end
     TC["testcontainers"]
@@ -76,7 +78,7 @@ graph LR
 | # | Invariant | Verification |
 |---|-----------|-------------|
 | I1 | One container per session — not per test | Fixture is `session`-scoped; TRUNCATE provides isolation |
-| I2 | Migrations run exactly once per session | `apply_pending` called in session fixture, not per-test |
+| I2 | Migrations run exactly once per session | `ensure_schema` called in session fixture, not per-test |
 | I3 | Tests are isolated — data from test A does not leak to test B | TRUNCATE before each test; integration test: two tests inserting same key both succeed |
 | I4 | Stub embeddings are deterministic — same input produces same vector | Unit test: `embed(["hello"])` called twice returns identical vectors |
 | I5 | Stub embeddings produce vectors of the configured dimension | Unit test: `len(embed(["hello"])[0]) == dim` |
@@ -93,9 +95,11 @@ to this LLD. We choose **TRUNCATE**:
   DDL operations that force implicit commits.
 - **Per-test schemas** (`CREATE SCHEMA test_N; ... DROP SCHEMA`) are clean
   but slow and require reconfiguring the store's search path per test.
-- **TRUNCATE** of the `store`, `store_vectors`, and `projects` tables between
-  tests is simple, correct, and fast for the test volumes Phase 0 will have.
-  It runs in a fraction of a millisecond on empty-ish tables.
+- **TRUNCATE** of the `store` and `store_vectors` tables between tests is
+  simple, correct, and fast for the test volumes Phase 0 will have. It runs in
+  a fraction of a millisecond on empty-ish tables. The `projects` table named
+  in earlier drafts does not exist yet — it is deferred per ADR-0014, so only
+  `store` and `store_vectors` are truncated.
 
 If test count grows to the point where TRUNCATE overhead matters, we revisit.
 
@@ -146,7 +150,14 @@ class TestTestFixture:
     async def test_truncate_isolation(
         self, store: AsyncPostgresStore
     ) -> None:
-        """Data inserted in one test is not visible in the next."""
+        """Data inserted in one test is not visible in the next. The sibling
+        test asserts the table is empty at test start."""
+
+    async def test_truncate_isolation_no_leak(
+        self, store: AsyncPostgresStore
+    ) -> None:
+        """The table is empty at test start because the previous test's data
+        was truncated."""
 
 
 @pytest.mark.integration
@@ -165,6 +176,11 @@ class TestSmoke:
         """Given a record with scope=global and project_id!='_',
         aput raises (CHECK constraint)."""
 ```
+
+> **Implementation note (issue #77):** The test-author expanded the stub unit
+> suite beyond the five BDD specs above — custom-dimension vectors, empty-input
+> handling, and the public `dim` attribute are all covered in
+> `tests/test_stub_embeddings.py` (13 tests).
 
 ---
 
@@ -214,24 +230,33 @@ class StubEmbeddingsProvider:
 1. For each text, compute `hashlib.sha256(text.encode()).digest()`.
 2. Extend the hash bytes by rehashing to fill `dim` floats:
    `bytes_needed = dim * 4`; chain `sha256(digest + counter)` until enough.
-3. Unpack bytes as `struct.unpack(f'{dim}f', raw_bytes[:dim*4])`.
+3. Unpack the bytes as `dim` unsigned 32-bit ints
+   (`struct.unpack(f'{dim}I', raw_bytes[:dim*4])`) and map each to `[-1, 1)`
+   via `(i / 0xFFFFFFFF) * 2.0 - 1.0`.
 4. L2-normalise the resulting vector so cosine similarity is meaningful.
 
 This ensures: deterministic, different inputs → different vectors, correct
 dimension, unit norm.
 
+> **Implementation note (issue #77):** The draft proposed unpacking the hash
+> bytes directly as IEEE-754 floats (`struct.unpack(f'{dim}f', ...)`). Raw
+> hash bytes frequently form NaN/inf bit patterns, which corrupt normalisation.
+> The implementation instead reinterprets the bytes as unsigned ints and maps
+> them into `[-1, 1)`, which is always finite.
+
 #### `tests/conftest.py`
 
 ```python
-"""Shared pytest fixtures for integration tests."""
+"""Shared pytest fixtures for the Recall test suite."""
 
+import psycopg
 import pytest
 import pytest_asyncio
 
 # Session-scoped fixtures (one container per test run)
 
 @pytest.fixture(scope="session")
-def pg_container():
+def postgres_container():
     """Start a Postgres+pgvector container for the session.
 
     Uses testcontainers PostgresContainer with the pgvector image
@@ -240,25 +265,32 @@ def pg_container():
     ...
 
 @pytest.fixture(scope="session")
-def pg_conn_string(pg_container) -> str:
-    """Connection string for the session's Postgres container."""
+def postgres_dsn(postgres_container) -> str:
+    """Connection string, normalised from the testcontainers default
+    ``postgresql+psycopg2://`` scheme to bare ``postgresql://``."""
+    ...
+
+@pytest.fixture(scope="session")
+def pg_conn_string(postgres_dsn) -> str:
+    """Alias for the session's Postgres connection string."""
     ...
 
 @pytest_asyncio.fixture(scope="session")
-async def _migrated_db(pg_conn_string: str) -> None:
-    """Run apply_pending once for the session."""
+async def _migrated_db_sess(pg_conn_string: str) -> None:
+    """Run ensure_schema once for the session (ADR-0013)."""
     ...
 
 @pytest_asyncio.fixture(scope="session")
-async def _store_session(pg_conn_string: str, _migrated_db: None):
-    """Session-scoped AsyncPostgresStore with stub embeddings index."""
+async def _store_session(pg_conn_string: str, _migrated_db_sess: None):
+    """Session-scoped marker — _migrated_db_sess ensures schema is ready."""
     ...
 
 # Per-test fixtures (isolation via TRUNCATE)
 
 @pytest_asyncio.fixture
 async def store(_store_session, pg_conn_string: str):
-    """Per-test store fixture. TRUNCATEs tables before yielding.
+    """Per-test store fixture. TRUNCATEs store, store_vectors before
+    yielding an AsyncPostgresStore backed by the StubEmbeddingsProvider.
 
     This ensures each test starts with a clean state.
     """
@@ -269,15 +301,27 @@ async def store(_store_session, pg_conn_string: str):
 
 - **Container image:** `pgvector/pgvector:pg16` — includes both Postgres 16
   and the pgvector extension pre-installed.
+- **Schema setup:** `ensure_schema()` from `recall.db.schema` (ADR-0013)
+  applies the recall-owned DDL idempotently, once per session. The
+  `AsyncPostgresStore.setup()` handles LangGraph-managed tables.
 - **TRUNCATE:** Before each test, execute
-  `TRUNCATE store, store_vectors, projects CASCADE` via a raw asyncpg
-  connection. This is faster than DROP/CREATE and preserves the schema.
-- **Store index config:** Use `PostgresIndexConfig` with the
-  `StubEmbeddingsProvider` wrapped in a LangChain-compatible adapter
-  (or use the store's native embedding support if available). `dims` matches
-  the stub's `dim` (384).
-- **Event loop:** `pytest-asyncio` with `asyncio_mode = "auto"` handles
-  the event loop. Session-scoped async fixtures use `scope="session"`.
+  `TRUNCATE store, store_vectors CASCADE` via a raw `psycopg.AsyncConnection`.
+  This is faster than DROP/CREATE and preserves the schema. The `projects`
+  table is deferred per ADR-0014.
+- **Store index config:** Use `PostgresIndexConfig(dims=stub.dim, embed=_embed)`
+  where `_embed` delegates to the `StubEmbeddingsProvider` — the store's native
+  `embed` callable, no LangChain adapter needed. `dims` matches the stub's
+  `dim` (384).
+- **Event loop:** On Windows, `asyncio.WindowsSelectorEventLoopPolicy()` must
+  be installed for `psycopg` async connections. `pytest-asyncio` handles the
+  loop; session-scoped async fixtures use `scope="session"`.
+
+> **Implementation note (issue #77):** The draft referenced `apply_pending`
+> (the pre-ADR-0013 migration runner) and raw asyncpg connections. By the time
+> this landed, ADR-0013 had replaced the migration runner with the idempotent
+> `ensure_schema()` setup, and raw DB access (TRUNCATE, schema checks) uses
+> `psycopg.AsyncConnection`. Fixture names in the draft (`pg_container`,
+> `_migrated_db`) were renamed (`postgres_container`, `_migrated_db_sess`).
 
 #### `tests/test_smoke.py`
 
