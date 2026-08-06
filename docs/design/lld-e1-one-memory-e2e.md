@@ -1,3 +1,7 @@
+> **Superseded.** This document has been migrated to [docs/design/v2/lld-e1-one-memory-e2e.md](v2/lld-e1-one-memory-e2e.md).
+> The v2 revision is synced with ADR-0014 (deferred project registry) and has up-to-date issue references (#86–#91).
+> This copy is retained for historical reference only.
+
 # LLD — Epic 1: One Memory, End-to-End
 
 ## Document Control
