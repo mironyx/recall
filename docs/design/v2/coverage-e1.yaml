@@ -1,0 +1,98 @@
+# Coverage manifest — Epic E1 (One memory, end-to-end)
+#
+# Maps each requirements story to its LLD section, implementing task issue,
+# and files. Populated by edf:architect; files backfilled by edf:feature-end
+# after merge. Status transitions:
+#   Draft → Approved (lld written) → Implemented (PR merged) → Revised (lld corrected)
+
+epic: e1
+entries:
+  - req: REQ-story-11-store-a-memory
+    lld: lld-e1-one-memory-e2e.md#LLD-e1-memory-service
+    issue: 90
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Partial coverage: save path only. Update and delete are Phase 3 (E3.1, E3.2).
+
+  - req: REQ-story-12-scope-invariant-enforcement
+    lld: lld-e1-one-memory-e2e.md#LLD-e1-storage-adapter
+    issue: 89
+    files: []
+    status: Approved
+    lld_revision: r1
+
+  - req: REQ-story-13-embedding-generation-on-save
+    lld: lld-e1-one-memory-e2e.md#LLD-e1-embedder
+    issue: 88
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Stub provider only in Phase 1. Real providers deferred to Phase 4 (E4.1).
+
+  - req: REQ-story-24-retrieve-a-memory-by-id
+    lld: lld-e1-one-memory-e2e.md#LLD-e1-memory-service
+    issue: 90
+    files: []
+    status: Approved
+    lld_revision: r1
+
+  - req: REQ-story-41-streamable-http-transport
+    lld: lld-e1-one-memory-e2e.md#LLD-e1-tool-router
+    issue: 91
+    files: []
+    status: Approved
+    lld_revision: r1
+
+  - req: REQ-story-43-structured-error-responses
+    lld: lld-e1-one-memory-e2e.md#LLD-e1-errors
+    issue: 91
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Partial coverage: only Phase 1 error codes. Full vocabulary deferred to Phase 3 (E3.3).
+
+  - req: REQ-story-51-user-id-resolution
+    lld: lld-e1-one-memory-e2e.md#LLD-e1-auth
+    issue: 86
+    files: []
+    status: Approved
+    lld_revision: r1
+
+  - req: REQ-story-54-storage-namespace
+    lld: lld-e1-one-memory-e2e.md#LLD-e1-storage-adapter
+    issue: 89
+    files: []
+    status: Approved
+    lld_revision: r1
+
+  - req: REQ-story-55-global-name-rejection
+    lld: lld-e1-one-memory-e2e.md#LLD-e1-project-id-validation
+    issue: 87
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Per ADR-0014: only format validation + reserved-name rejection. No projects table.
+
+  - req: REQ-story-56-bearer-token-authentication
+    lld: lld-e1-one-memory-e2e.md#LLD-e1-auth
+    issue: 86
+    files: []
+    status: Approved
+    lld_revision: r1
+
+  - req: REQ-story-14-update-a-memory
+    lld: null
+    issue: null
+    files: []
+    status: Draft
+    lld_revision: r0
+    # Deferred to Phase 3 (E3.1).
+
+  - req: REQ-story-15-delete-a-memory
+    lld: null
+    issue: null
+    files: []
+    status: Draft
+    lld_revision: r0
+    # Deferred to Phase 3 (E3.2).
