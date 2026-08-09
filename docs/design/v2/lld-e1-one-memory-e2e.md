@@ -38,7 +38,6 @@ sequenceDiagram
     participant Router as Tool Router
     participant MS as Memory Service
     participant SA as Storage Adapter
-    participant Emb as Embedder
     participant DB as Postgres
 
     Agent->>Transport: POST /mcp (memory_save)
@@ -51,9 +50,8 @@ sequenceDiagram
     Router->>MS: save(scope, project_id, user_id, kind, title, content, tags?)
     MS->>MS: enforce scope invariant (project ↔ project_id)
     MS->>MS: build flat value dict (ADR-0001)
-    MS->>Emb: embed([content])
-    Emb-->>MS: [vector]
     MS->>SA: put(namespace, key, value, index=["content"])
+    Note over SA,DB: AsyncPostgresStore.aput() handles\nembedding via PostgresIndexConfig
     SA->>DB: AsyncPostgresStore.aput(...)
     DB-->>SA: ok
     SA-->>MS: ok
@@ -143,8 +141,8 @@ graph TB
     Router --> Validation
     Tools --> MS
     MS --> SA
-    MS --> Emb
     SA --> DB
+    Emb -.->|PostgresIndexConfig| SA
     Emb -.->|Phase 4| ExtEmb
 ```
 
@@ -297,8 +295,8 @@ class TestStorageAdapter:
 class TestMemoryService:
     """Integration tests for save + get orchestration."""
 
-    async def test_save_embeds_then_puts(self, service) -> None:
-        """save() calls embed then put, returns an id."""
+    async def test_save_delegates_to_storage_and_returns_id(self, service) -> None:
+        """save() builds flat value, calls storage.put with index=["content"], returns an id."""
 
     async def test_save_builds_flat_value(self, service) -> None:
         """The stored value has kind, scope, title, content, user_id at root."""
@@ -324,8 +322,8 @@ class TestMemoryService:
 | Auth | Fully covered — token-file loader, header parsing, contextvar |
 | Tool Router | Fully covered — dispatch, validation, error formatting, logging |
 | Project Registry | **Deferred (ADR-0014).** Project ID validated as well-formed string only; no DB-backed registry, no CLI |
-| Memory Service | save and get_by_id covered; search/update/delete are E2/E3 |
-| Embedder | Interface + stub fully covered; real providers are E4 |
+| Memory Service | save and get_by_id covered; search/update/delete are E2/E3. Embedding is delegated to AsyncPostgresStore via index=["content"]. |
+| Embedder | Interface + stub fully covered; plugged into PostgresIndexConfig at store creation. Real providers are E4. |
 | Storage Adapter | put and get covered; search is E2 |
 | CLI | No new CLI commands in Phase 1 (project CLI deferred per ADR-0014) |
 
@@ -593,15 +591,13 @@ from typing import Any
 
 
 class MemoryService:
-    """Orchestrates memory operations across storage and embeddings."""
+    """Orchestrates memory operations: build value, delegate to storage, resolve get-by-id."""
 
     def __init__(
         self,
         storage: StorageAdapter,
-        embedder: EmbeddingsProvider,
     ) -> None:
         self._storage = storage
-        self._embedder = embedder
 
     async def save(
         self,
@@ -618,7 +614,8 @@ class MemoryService:
 
         1. Enforce scope invariant.
         2. Build the flat value dict (ADR-0001).
-        3. Delegate to storage adapter (embedding handled by store index).
+        3. Delegate to StorageAdapter — AsyncPostgresStore handles embedding
+           internally via PostgresIndexConfig when index=["content"] is passed.
         4. Return the generated ID.
 
         Args:
@@ -978,7 +975,7 @@ MEMORY_GET_SCHEMA = {
 | `embeddings/provider.py` | Abstract interface | No implementation |
 | `embeddings/stub.py` | Deterministic test/dev provider | No I/O |
 | `storage_adapter.py` | Namespace construction, scope invariant, delegate to store | Thin wrapper over AsyncPostgresStore |
-| `memory_service.py` | Orchestrate save (build value → put) and get (index lookup → aget) | Depends on storage + embedder |
+| `memory_service.py` | Orchestrate save (build value → put) and get (index lookup → aget) | Depends on storage adapter only |
 | `tool_router.py` | Dispatch, validation, error formatting, logging | Depends on service + auth |
 | `models.py` | Pydantic models for the flat value schema | Pure data |
 | `errors.py` | Domain error types with {error, hint} shape | Pure data |
@@ -993,7 +990,7 @@ MEMORY_GET_SCHEMA = {
 | 2 | E1.2 | Project ID validation — format check, reserved-name guard (ADR-0014) | `src/recall/validation.py`, `src/recall/errors.py` (ValidationError), `tests/test_validation.py` | E0.1 |
 | 3 | E1.3 | Embedder interface + stub upgrade | `src/recall/embeddings/provider.py`, `src/recall/embeddings/stub.py`, `tests/test_embeddings.py` | E0.5 |
 | 4 | E1.4 | Storage adapter — put/get with namespace construction | `src/recall/storage_adapter.py`, `src/recall/models.py`, `tests/test_storage_adapter.py` | E1.3 |
-| 5 | E1.5 | Memory Service — save + get_by_id with reverse index | `src/recall/memory_service.py`, `tests/test_memory_service.py` | E1.3, E1.4 |
+| 5 | E1.5 | Memory Service — save + get_by_id with reverse index | `src/recall/memory_service.py`, `tests/test_memory_service.py` | E1.4 |
 | 6 | E1.6 | Tool Router + MCP wiring for memory_save + memory_get | `src/recall/tool_router.py`, `src/recall/server.py`, `tests/test_tool_router.py`, `tests/test_e2e_phase1.py` | E1.1, E1.2, E1.5 |
 
 <a id="LLD-e1-execution-waves"></a>
@@ -1004,5 +1001,5 @@ MEMORY_GET_SCHEMA = {
 |------|-------|------------|-------|
 | 1 | E1.1, E1.2, E1.3 | Phase 0 | Parallelisable — no shared files |
 | 2 | E1.4 | E1.3 | Storage adapter needs embedder interface |
-| 3 | E1.5 | E1.3, E1.4 | Memory service needs both |
+| 3 | E1.5 | E1.4 | Memory service needs storage adapter |
 | 4 | E1.6 | E1.1, E1.2, E1.5 | Tool router integrates everything |
