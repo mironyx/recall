@@ -14,6 +14,7 @@
 | Date | 2026-04-12 |
 | Last revised | 2026-08-06 — synced with ADR-0014 (deferred project registry), migrated to docs/design/v2/, added LLD anchors for coverage manifest |
 | Revised | 2026-08-09 — synced with E1.1 implementation (issue #86): case-insensitive Bearer scheme, user_id string validation, RECALL_AUTH_FILE wiring deferred to E1.6 |
+| Revised | 2026-08-09 — synced with E1.2 implementation (issue #87): `.fullmatch()` replaces `.match()` (trailing-newline gap); ValidationError(RecallError) shape deferred to E1.6 (#91); wave-table shared-files correction |
 
 ---
 
@@ -442,12 +443,19 @@ def validate_project_id_format(project_id: str) -> None:
         raise ValidationError(
             f"'{project_id}' is a reserved name and cannot be used as a project_id"
         )
-    if not PROJECT_ID_PATTERN.match(project_id):
+    if not PROJECT_ID_PATTERN.fullmatch(project_id):
         raise ValidationError(
             f"project_id '{project_id}' is invalid. "
             "Must match ^[a-zA-Z0-9_-]{1,128}$"
         )
 ```
+
+> **Implementation note (issue #87):** The spec used `re.match(...)` with a
+> `$` anchor. Python's `$` matches just before a trailing `\n`, so `.match()`
+> silently accepted `'global\n'` and a 129-char ID ending in newline —
+> bypassing the reserved-name guard and the `{1,128}` bound. The
+> implementation uses `PROJECT_ID_PATTERN.fullmatch()`, which rejects both
+> (regression test `test_trailing_newline_rejected`).
 
 **Key details:**
 - Pure function — no I/O, no DB. Trivially unit-testable.
@@ -780,7 +788,7 @@ class UnauthenticatedError(RecallError):
         )
 
 
-class ValidationError(RecallError):
+class ValidationError(RecallError):  # _(deferred → issue #91)_ — currently a bare Exception subclass
     def __init__(self, detail: str) -> None:
         super().__init__(
             error="validation_error",
@@ -1021,7 +1029,13 @@ MEMORY_GET_SCHEMA = {
 
 | Wave | Tasks | Blocked by | Notes |
 |------|-------|------------|-------|
-| 1 | E1.1, E1.2, E1.3 | Phase 0 | Parallelisable — no shared files |
+| 1 | E1.1, E1.2, E1.3 | Phase 0 | Parallelisable; E1.1 and E1.2 share `src/recall/errors.py` — second landing PR must rebase and merge both error classes |
+
+> **Implementation note (issue #87):** The original "no shared files" claim
+> was wrong — E1.1 (issue #86) writes `RecallError`/`UnauthenticatedError`
+> and E1.2 (issue #87) writes `ValidationError` in the same module. Still
+> parallelisable, but the second PR to land rebases `errors.py` and keeps
+> both sides' classes.
 | 2 | E1.4 | E1.3 | Storage adapter needs embedder interface |
 | 3 | E1.5 | E1.4 | Memory service needs storage adapter |
 | 4 | E1.6 | E1.1, E1.2, E1.5 | Tool router integrates everything |
