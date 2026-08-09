@@ -39,6 +39,7 @@ sequenceDiagram
     participant MS as Memory Service
     participant SA as Storage Adapter
     participant DB as Postgres
+    participant Emb as Embedder
 
     Agent->>Transport: POST /mcp (memory_save)
     Transport->>Auth: authenticate(Authorization header)
@@ -51,8 +52,10 @@ sequenceDiagram
     MS->>MS: enforce scope invariant (project ↔ project_id)
     MS->>MS: build flat value dict (ADR-0001)
     MS->>SA: put(namespace, key, value, index=["content"])
-    Note over SA,DB: AsyncPostgresStore.aput() handles\nembedding via PostgresIndexConfig
     SA->>DB: AsyncPostgresStore.aput(...)
+    DB->>Emb: embed([content])
+    Emb-->>DB: [vector]
+    DB->>DB: INSERT store + store_vectors
     DB-->>SA: ok
     SA-->>MS: ok
     MS-->>Router: {id}
