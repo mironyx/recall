@@ -18,9 +18,15 @@ if TYPE_CHECKING:
 class TestTestFixture:
     """Integration tests proving the session-scoped fixture itself works."""
 
-    async def test_container_boots_and_schema_applies(self, pg_conn_string: str) -> None:
+    async def test_container_boots_and_schema_applies(
+        self, pg_conn_string: str, _migrated_db_sess: None
+    ) -> None:
         """The session fixture delivers a conn_string to a running Postgres
-        with all migrations applied."""
+        with all migrations applied.
+
+        Requests ``_migrated_db_sess`` so the assertion does not depend on
+        another test having triggered the session migration first.
+        """
         import psycopg
 
         async with (
