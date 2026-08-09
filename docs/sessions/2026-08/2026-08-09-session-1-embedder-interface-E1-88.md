@@ -18,6 +18,7 @@
   (`provider.py` new, `stub.py` small), 1 new test file.
 
 ## Cost checkpoints
+
 | Step | Timestamp | Cost (cumulative) | Tokens (cumulative) | Note |
 |------|-----------|--------------------|----------------------|------|
 | 3c   | 2026-08-09T13:05:00Z | $0.0000 | 0 in / 0 out | pressure: standard |
@@ -26,3 +27,4 @@
 | 5    | 2026-08-09T12:15:29Z | $0.0000 | 0 in / 0 out | green on attempt 3 (87/87; mypy+ruff clean) |
 | 6    | 2026-08-09T12:16:04Z | $0.0000 | 0 in / 0 out | diag pass (CodeScene 10.0 x4; no SonarQube project; no editor diagnostics) |
 | 6b   | 2026-08-09T12:19:08Z | $0.0000 | 0 in / 0 out | evaluator: PASS WITH WARNINGS (3 adversarial tests added) |
+| 8    | 2026-08-09T12:19:46Z | $0.0000 | 0 in / 0 out | [PR #113](https://github.com/mironyx/recall/pull/113) |
