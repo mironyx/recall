@@ -84,7 +84,10 @@ Coverage manifest: no changes (no corrections to flip, no new sections, no Rev N
 
 ## Cost retrospective
 
-No cost figures recorded (Prometheus unavailable — all checkpoints show $0.0000 / 0 tokens).
+Final feature cost (Prometheus, stage=final, applied to issue #86 and PR #112):
+**$13.5448** — 415,326 input / 153,794 output / 15,246,720 cache-read tokens.
+(Checkpoints recorded during the run showed unavailable / $0.0000; the final
+query recovered the true figures after the session-continuation tag.)
 Checkpoint table analysis (step gaps):
 - **3c → 5 (implementation friction):** moderate — one pre-existing smoke-test
   failure on the full suite (E0.5 fixture ordering, reproduced on clean main);
