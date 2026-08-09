@@ -18,3 +18,4 @@
 | 6b   | 2026-08-09T13:20:00Z | $0.0000 | 0/0/0/0 | evaluator: FAIL → fixed (user_id str check); 3 adversarial tests added, 28/28 now pass |
 | 5r   | 2026-08-09T13:22:00Z | $0.0000 | 0/0/0/0 | re-run after evaluator fix: 97/98 (1 pre-existing smoke fail), mypy/ruff clean, CodeScene 10.0 |
 | 8    | 2026-08-09T13:26:00Z | $0.0000 | 0/0/0/0 | [PR #112](https://github.com/mironyx/recall/pull/112) — body patched with pre-existing failure notes |
+| 9    | 2026-08-09T13:35:00Z | $0.0000 | 0/0/0/0 | review clean after 3 rounds — 6 findings fixed, 1 N/A (Co-Authored-By), 31/31 tests |
