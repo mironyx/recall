@@ -21,3 +21,4 @@
 | 6b   | 2026-08-09T13:40:00Z | $0.0000 | 0 | evaluator: PASS (0 adversarial; smoke failure independently confirmed pre-existing; stale docstring fixed) |
 | 8    | 2026-08-09T13:45:00Z | $0.0000 | 0 | [PR #111](https://github.com/mironyx/recall/pull/111) |
 | 9    | 2026-08-09T14:05:00Z | $0.0000 | 0 | pr-review blocker: `.match()` accepts trailing newline → fixed to `.fullmatch()`; regression tests added; ValidationError shape deferred to #91 (TODO marker) |
+| 9b   | 2026-08-09T14:20:00Z | $0.0000 | 0 | re-review after fix: conformance clean; quality — Co-Authored-By "block" adjudicated false positive (no such rule in project CLAUDE.md/kb; harness mandates the trailer; history not rewritten), warn: LLD wave table wrongly claims E1.1/E1.2 share no files (both write errors.py) — flagged for lead + lld-sync |
