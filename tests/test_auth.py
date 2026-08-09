@@ -113,6 +113,14 @@ class TestAuth:
         with pytest.raises(UnauthenticatedError):
             authenticate(cfg, "Bearer ")
 
+    @pytest.mark.parametrize("header", ["bearer tok_abc", "BEARER tok_abc", "BeArEr tok_abc"])
+    def test_bearer_scheme_is_case_insensitive(self, header: str) -> None:
+        """Given a valid token under any letter case of the "Bearer" scheme,
+        authenticate resolves the user_id (RFC 7235 §2.1 — auth-scheme tokens
+        are case-insensitive). Regression test for PR #112 review finding."""
+        cfg = AuthConfig(token_map={"tok_abc": "alice"})
+        assert authenticate(cfg, header) == "alice"
+
     # ------------------------------------------------------------------
     # load_auth_config() — token-file parsing (Story 5.6 AC1)
     # ------------------------------------------------------------------

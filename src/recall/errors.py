@@ -1,5 +1,7 @@
 """Shared error types and structured error formatting."""
 
+from __future__ import annotations
+
 
 class RecallError(Exception):
     """Base error for all Recall domain errors."""
