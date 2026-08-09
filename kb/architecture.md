@@ -8,6 +8,8 @@
 
 Single-container MCP server. `src/recall/server.py` is the composition root: it wires Auth → Tool Router → Memory Service → Embedder → Postgres. No DI framework — manual constructor injection at startup.
 
+- `src/recall/validation.py` — `validate_project_id_format()` (pure function, ADR-0002/ADR-0014). Reuse it for any project_id format check; do not re-implement the `^[a-zA-Z0-9_-]{1,128}$` regex inline.
+
 ## Scope invariant (ADR-0001, ADR-0002)
 
 Namespace is `(scope, project_id)`. `scope` is `"global"` or `"project"`. The CHECK constraint on `store` enforces `prefix = 'global._'` or `prefix LIKE 'project.%' AND prefix != 'project._'`. Never store project-specific data under `scope=global`.

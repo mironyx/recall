@@ -72,9 +72,11 @@ entries:
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-project-id-validation
     issue: 87
     files: []
-    status: Approved
+    status: Revised
     lld_revision: r1
     # Per ADR-0014: only format validation + reserved-name rejection. No projects table.
+    # Revised: lld-sync (issue #87) corrected .match() → .fullmatch() and recorded
+    # the ValidationError(RecallError) shape deferral to E1.6 (#91).
 
   - req: REQ-story-56-bearer-token-authentication
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-auth
