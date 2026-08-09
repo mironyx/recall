@@ -71,7 +71,9 @@ entries:
   - req: REQ-story-55-global-name-rejection
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-project-id-validation
     issue: 87
-    files: []
+    files:
+      - src/recall/validation.py
+      - src/recall/errors.py
     status: Revised
     lld_revision: r1
     # Per ADR-0014: only format validation + reserved-name rejection. No projects table.
