@@ -7,6 +7,7 @@
 - **Pressure:** standard — ~50 src lines across 2 source files (`validation.py`, `errors.py`), 1 test file.
 
 ## Cost checkpoints
+
 | Step | Timestamp | Cost (cumulative) | Tokens (cumulative) | Note |
 |------|-----------|--------------------|----------------------|------|
 | 3c   | 2026-08-09T13:05:00Z | $0.0000 | 0 | pressure: standard |
@@ -15,3 +16,4 @@
 | 5    | 2026-08-09T13:30:00Z | $0.0000 | 0 | green on attempt 4 (mypy/ruff/format/11 tests). Full suite: 80/81 — pre-existing smoke-test fixture failure also fails on clean main (order-dependent: pg_conn teardown drops tables before test_container_boots runs; unrelated to #87) |
 | 6    | 2026-08-09T13:35:00Z | $0.0000 | 0 | diag pass — exporter N/A (no .diagnostics in worktree); CodeScene 10.0/10.0; SonarQube N/A (repo not analyzed) |
 | 6b   | 2026-08-09T13:40:00Z | $0.0000 | 0 | evaluator: PASS (0 adversarial; smoke failure independently confirmed pre-existing; stale docstring fixed) |
+| 8    | 2026-08-09T13:45:00Z | $0.0000 | 0 | [PR #111](https://github.com/mironyx/recall/pull/111) |
