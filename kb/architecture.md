@@ -9,6 +9,7 @@
 Single-container MCP server. `src/recall/server.py` is the composition root: it wires Auth → Tool Router → Memory Service → Embedder → Postgres. No DI framework — manual constructor injection at startup.
 
 - `src/recall/validation.py` — `validate_project_id_format()` (pure function, ADR-0002/ADR-0014). Reuse it for any project_id format check; do not re-implement the `^[a-zA-Z0-9_-]{1,128}$` regex inline.
+- `src/recall/storage_adapter.py` — `StorageAdapter` (thin wrapper over `AsyncPostgresStore`: builds the `(scope, project_id)` namespace, enforces the scope invariant, delegates `put`/`get`). Reuse it for any memory storage access; do not call the raw store directly.
 
 ## Scope invariant (ADR-0001, ADR-0002)
 
@@ -34,5 +35,5 @@ instead of re-implementing a stub embedder.
 The `EmbeddingsProvider` ABC and `validate_dim(provider, configured_dim)`
 live in `src/recall/embeddings/provider.py` (ADR-0008) — the embedder contract
 every provider implements (stub now, HTTP in E4). `validate_dim` is the
-fail-fast EMBEDDINGS_DIM check; it is wired at store creation (E1.4). Reuse
-both when adding providers or index-backed wiring.
+fail-fast EMBEDDINGS_DIM check; it is wired at store creation (E1.6, issue #91).
+Reuse both when adding providers or index-backed wiring.
