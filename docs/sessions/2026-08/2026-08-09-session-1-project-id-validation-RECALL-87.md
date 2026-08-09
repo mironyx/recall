@@ -3,7 +3,10 @@
 ## Approach rationale
 - **Issue:** #87
 - **Approach chosen:** Follow the LLD §E1.2 verbatim — module-level `PROJECT_ID_PATTERN` (`^[a-zA-Z0-9_-]{1,128}$`), `RESERVED_PROJECT_IDS` frozenset (`{"global", "_"}`), and a pure `validate_project_id_format()` raising `ValidationError` from the shared `errors.py` module. The LLD is already the ADR-0014-reconciled replacement for the dropped `ProjectRegistry`; any deviation would add complexity, not remove it.
-- **LLD deviations:** none. (Issue body names the function `validate_project_id()`; LLD and E1.6 router call `validate_project_id_format()` — implemented per LLD.)
+- **LLD deviations:**
+  1. `.fullmatch()` instead of the LLD's `.match()` — Python's `$` anchor matches just before a trailing `\n`, so `.match()` silently accepts `'global\n'` and a 129-char ID ending in newline, bypassing the reserved-name guard and the `{1,128}` bound. `.fullmatch()` rejects both (PR #111 review finding; regression test added).
+  2. `ValidationError` is a bare `Exception` subclass for now, not `ValidationError(RecallError)` with `error`/`hint` attributes per LLD §E1.1. Deferred to #91 — E1.1 (#86) lands `RecallError` in this module in parallel, and the E1.6 error formatter (#91) is the consumer of the structured shape. Marked with `TODO(#91)` in `errors.py`.
+  (Issue body names the function `validate_project_id()`; LLD and E1.6 router call `validate_project_id_format()` — implemented per LLD.)
 - **Pressure:** standard — ~50 src lines across 2 source files (`validation.py`, `errors.py`), 1 test file.
 
 ## Cost checkpoints
@@ -17,3 +20,4 @@
 | 6    | 2026-08-09T13:35:00Z | $0.0000 | 0 | diag pass — exporter N/A (no .diagnostics in worktree); CodeScene 10.0/10.0; SonarQube N/A (repo not analyzed) |
 | 6b   | 2026-08-09T13:40:00Z | $0.0000 | 0 | evaluator: PASS (0 adversarial; smoke failure independently confirmed pre-existing; stale docstring fixed) |
 | 8    | 2026-08-09T13:45:00Z | $0.0000 | 0 | [PR #111](https://github.com/mironyx/recall/pull/111) |
+| 9    | 2026-08-09T14:05:00Z | $0.0000 | 0 | pr-review blocker: `.match()` accepts trailing newline → fixed to `.fullmatch()`; regression tests added; ValidationError shape deferred to #91 (TODO marker) |

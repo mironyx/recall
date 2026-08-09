@@ -107,6 +107,14 @@ class TestProjectIdValidation:
         with pytest.raises(ValidationError):
             validate_project_id_format("p" * 129)
 
+    def test_trailing_newline_rejected(self) -> None:
+        """Given project_id with a trailing newline, validation raises
+        ValidationError (PR review finding: re.match '$' accepts a final
+        '\\n', silently bypassing the length bound and reserved-name guard)."""
+        for project_id in ("abc\n", "global\n", "GLOBAL\n", "p" * 128 + "\n"):
+            with pytest.raises(ValidationError):
+                validate_project_id_format(project_id)
+
     # ------------------------------------------------------------------
     # Error shape — public error type and message contract (Story 4.3)
     # ------------------------------------------------------------------

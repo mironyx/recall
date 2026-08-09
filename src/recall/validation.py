@@ -28,7 +28,7 @@ def validate_project_id_format(project_id: str) -> None:
         raise ValidationError(
             f"'{project_id}' is a reserved name and cannot be used as a project_id"
         )
-    if not PROJECT_ID_PATTERN.match(project_id):
+    if not PROJECT_ID_PATTERN.fullmatch(project_id):
         raise ValidationError(
             f"project_id '{project_id}' is invalid. Must match ^[a-zA-Z0-9_-]{{1,128}}$"
         )
