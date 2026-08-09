@@ -7,6 +7,7 @@
 - **Pressure:** standard — ~75 src lines across 2 source files (errors.py ~20, auth.py ~55), 1 test file.
 
 ## Cost checkpoints
+
 | Step | Timestamp | Cost (cumulative) | Tokens (cumulative) | Note |
 |------|-----------|--------------------|----------------------|------|
 | 3c   | 2026-08-09T13:04:00Z | $0.0000 | 0/0/0/0 | pressure: standard |
@@ -16,3 +17,4 @@
 | 6    | 2026-08-09T13:15:00Z | $0.0000 | 0/0/0/0 | diag pass — CodeScene 10.0×3; SonarQube N/A (project not analyzed); no .diagnostics in worktree |
 | 6b   | 2026-08-09T13:20:00Z | $0.0000 | 0/0/0/0 | evaluator: FAIL → fixed (user_id str check); 3 adversarial tests added, 28/28 now pass |
 | 5r   | 2026-08-09T13:22:00Z | $0.0000 | 0/0/0/0 | re-run after evaluator fix: 97/98 (1 pre-existing smoke fail), mypy/ruff clean, CodeScene 10.0 |
+| 8    | 2026-08-09T13:26:00Z | $0.0000 | 0/0/0/0 | [PR #112](https://github.com/mironyx/recall/pull/112) — body patched with pre-existing failure notes |
