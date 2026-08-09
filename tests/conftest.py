@@ -10,6 +10,7 @@ helpers. Tests that need a running container must be marked
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from collections.abc import AsyncIterator, Generator, Iterator
 from typing import TYPE_CHECKING
@@ -166,7 +167,16 @@ async def store(pg_conn_string: str, _store_session: None) -> AsyncIterator[obje
     from recall.embeddings.stub import StubEmbeddingsProvider
 
     await _truncate_all(pg_conn_string)
-    stub = StubEmbeddingsProvider()
+    # The store_vectors column dim is baked into the schema by ensure_schema
+    # (schema.py: RECALL_EMBEDDING_DIMS, default 1536). The stub embedder must
+    # match it, or any index-enabled aput fails ("expected N dimensions").
+    # TODO(#89): share the dim resolution with schema.py (promote _DEFAULT_DIMS
+    # to a public constant or a resolve_embedding_dims() helper) — the literal
+    # 1536 here can drift from schema.py's default. Deferred from PR review
+    # (PR #114); failures are loud (dim mismatch at aput) so the risk is low.
+    raw_dims = os.environ.get("RECALL_EMBEDDING_DIMS")
+    dims = int(raw_dims) if raw_dims else 1536
+    stub = StubEmbeddingsProvider(dim=dims)
 
     def _embed(texts: Sequence[str]) -> list[list[float]]:
         return stub.embed(list(texts))
