@@ -18,8 +18,10 @@ entries:
   - req: REQ-story-12-scope-invariant-enforcement
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-storage-adapter
     issue: 89
-    files: []
-    status: Approved
+    files:
+      - src/recall/storage_adapter.py
+      - src/recall/models.py
+    status: Implemented
     lld_revision: r1
 
   - req: REQ-story-13-embedding-generation-on-save
@@ -66,8 +68,10 @@ entries:
   - req: REQ-story-54-storage-namespace
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-storage-adapter
     issue: 89
-    files: []
-    status: Approved
+    files:
+      - src/recall/storage_adapter.py
+      - src/recall/models.py
+    status: Implemented
     lld_revision: r1
 
   - req: REQ-story-55-global-name-rejection
