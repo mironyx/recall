@@ -23,6 +23,10 @@ def load_auth_config(auth_file_path: str) -> AuthConfig:
     Raises:
         FileNotFoundError: if the file does not exist.
         ValueError: if the file is not valid JSON or has wrong shape.
+
+    TODO(#91): reading the path from RECALL_AUTH_FILE is wired at server
+    startup by E1.6 (Tool Router + MCP wiring); this loader deliberately
+    takes an explicit path per LLD §E1.1.
     """
     with open(auth_file_path) as f:
         data = json.load(f)
@@ -32,11 +36,13 @@ def load_auth_config(auth_file_path: str) -> AuthConfig:
 
     token_map: dict[str, str] = {}
     for token, value in data.items():
+        # NOTE: error messages deliberately do not include the token value —
+        # it is a live credential (ADR-0007) and must not reach logs.
         if not isinstance(value, dict):
-            raise ValueError(f"auth file entry for {token!r} must be an object with a user_id")
+            raise ValueError("auth file entry must be an object with a user_id")
         user_id = value.get("user_id")
         if not isinstance(user_id, str):
-            raise ValueError(f"auth file entry for {token!r} must have a string user_id")
+            raise ValueError("auth file entry must have a string user_id")
         token_map[token] = user_id
     return AuthConfig(token_map=token_map)
 
@@ -59,7 +65,8 @@ def authenticate(auth_config: AuthConfig, authorization_header: str | None) -> s
         raise UnauthenticatedError()
 
     parts = authorization_header.split()
-    if len(parts) != 2 or parts[0] != "Bearer":
+    # RFC 7235 §2.1: auth-scheme tokens are case-insensitive.
+    if len(parts) != 2 or parts[0].lower() != "bearer":
         raise UnauthenticatedError()
 
     user_id = auth_config.token_map.get(parts[1])

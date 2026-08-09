@@ -7,11 +7,9 @@ Contract sources:
 - ``docs/adr/0007-shared-bearer-token-auth.md`` (token → user_id map, file format)
 
 These tests are written against the PUBLIC API only: ``AuthConfig``,
-``load_auth_config``, ``authenticate``, ``UnauthenticatedError``. The stubs in
-``src/recall/auth.py`` and ``src/recall/errors.py`` raise ``NotImplementedError``;
-each test therefore currently fails with that, which is the expected
-pre-implementation state. No database or integration marker is needed — the
-Auth contract is pure (LLD: "pure function — no I/O, no DB").
+``load_auth_config``, ``authenticate``, ``UnauthenticatedError``. No database
+or integration marker is needed — the Auth contract is pure (LLD: "pure
+function — no I/O, no DB").
 """
 
 from __future__ import annotations
