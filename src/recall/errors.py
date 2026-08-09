@@ -18,3 +18,7 @@ class UnauthenticatedError(RecallError):
             error="unauthenticated",
             hint="Provide Authorization: Bearer <token> header.",
         )
+
+
+class ValidationError(Exception):
+    """Raised when input fails validation at the API boundary."""
