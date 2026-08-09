@@ -13,6 +13,7 @@
 | Status | Approved |
 | Date | 2026-04-12 |
 | Last revised | 2026-08-06 — synced with ADR-0014 (deferred project registry), migrated to docs/design/v2/, added LLD anchors for coverage manifest |
+| Revised | 2026-08-09 — synced with E1.1 implementation (issue #86): case-insensitive Bearer scheme, user_id string validation, RECALL_AUTH_FILE wiring deferred to E1.6 |
 
 ---
 
@@ -346,8 +347,9 @@ No additional migrations needed for E1. The `store` and `store_vectors` tables f
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from dataclasses import dataclass
+
+from recall.errors import UnauthenticatedError
 
 
 @dataclass(frozen=True)
@@ -390,6 +392,21 @@ def authenticate(auth_config: AuthConfig, authorization_header: str | None) -> s
   rotate tokens, per ADR-0007).
 - `authenticate()` is a pure function — no I/O, no DB. Easy to unit test.
 - `UnauthenticatedError` is defined in a shared `errors.py` module.
+
+> **Implementation note (issue #86):** The `Bearer` auth-scheme token is
+> matched case-insensitively (`parts[0].lower() != "bearer"`), per RFC 7235
+> §2.1 — auth-scheme tokens are case-insensitive. Regression-tested
+> (`test_bearer_scheme_is_case_insensitive`).
+>
+> **Implementation note (issue #86):** `load_auth_config` additionally
+> validates that each entry's `user_id` is a string (`ValueError` otherwise) —
+> a non-string `user_id` would silently corrupt the documented
+> `authenticate() -> str` contract. Loader error messages never include token
+> values (live credentials per ADR-0007).
+>
+> **Implementation note (issue #86):** Reading the file path from
+> `RECALL_AUTH_FILE` is wired at server startup by E1.6 (issue #91); the
+> loader itself takes an explicit path (see `TODO(#91)` in `load_auth_config`).
 
 <a id="LLD-e1-project-id-validation"></a>
 
@@ -742,6 +759,8 @@ class MemoryResponse(BaseModel):
 
 ```python
 """Shared error types and structured error formatting."""
+
+from __future__ import annotations
 
 
 class RecallError(Exception):
