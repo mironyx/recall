@@ -30,3 +30,9 @@ Deterministic test embeddings live in `src/recall/embeddings/stub.py`
 (`StubEmbeddingsProvider`), wired into the `store` fixture's index config via
 `PostgresIndexConfig(dims=..., embed=_embed)`. Reuse it for index-backed tests
 instead of re-implementing a stub embedder.
+
+The `EmbeddingsProvider` ABC and `validate_dim(provider, configured_dim)`
+live in `src/recall/embeddings/provider.py` (ADR-0008) — the embedder contract
+every provider implements (stub now, HTTP in E4). `validate_dim` is the
+fail-fast EMBEDDINGS_DIM check; it is wired at store creation (E1.4). Reuse
+both when adding providers or index-backed wiring.
