@@ -16,6 +16,7 @@
 | Revised | 2026-08-09 — synced with E1.1 implementation (issue #86): case-insensitive Bearer scheme, user_id string validation, RECALL_AUTH_FILE wiring deferred to E1.6 |
 | Revised | 2026-08-09 — synced with E1.2 implementation (issue #87): `.fullmatch()` replaces `.match()` (trailing-newline gap); ValidationError(RecallError) shape deferred to E1.6 (#91); wave-table shared-files correction |
 | Revised | 2026-08-09 — E1.3 (#88) implemented: sync `embed()` interface (see implementation note), `validate_dim` added |
+| Revised | 2026-08-09 — E1.4 (#89) implemented: `validate_dim` call-site corrected to E1.6 (#91); `validate_dim` added to provider.py code block |
 
 ---
 
@@ -503,6 +504,21 @@ class EmbeddingsProvider(ABC):
             One vector per input text, each of length self.dim.
         """
         ...
+
+
+def validate_dim(provider: EmbeddingsProvider, configured_dim: int) -> None:
+    """Fail-fast check that the configured dim matches the provider's dim.
+
+    Called at startup wiring; a mismatch raises before any memory operation.
+
+    Raises:
+        ValueError: if ``configured_dim`` != ``provider.dim``.
+    """
+    if provider.dim != configured_dim:
+        raise ValueError(
+            f"EMBEDDINGS_DIM={configured_dim} does not match "
+            f"{type(provider).__name__}.dim={provider.dim}"
+        )
 ```
 
 **Key details:**
@@ -510,8 +526,14 @@ class EmbeddingsProvider(ABC):
 - The stub from E0.5 (`StubEmbeddingsProvider`) implements this interface.
   It moves from a plain class to inheriting `EmbeddingsProvider`.
 - `validate_dim(provider, configured_dim)` is the fail-fast check for
-  EMBEDDINGS_DIM vs the provider's dim; the startup call site lands in E1.4
-  (store creation, issue #89).
+  EMBEDDINGS_DIM vs the provider's dim; the startup call site lands at the
+  composition root (E1.6, issue #91).
+
+> **Implementation note (issue #89):** the LLD originally placed
+> `validate_dim`'s call site in E1.4 ("store creation"), but E1.4's
+> `StorageAdapter` wraps an *injected* `AsyncPostgresStore` — it has no
+> store-creation site. Store creation lives at the composition root
+> (`server.py` wiring, E1.6, issue #91), so the wiring is deferred there.
 
 > **Implementation note (issue #88):** `embed()` was specified as `async` but
 > was built **synchronous**. The only v1 consumer — LangGraph's

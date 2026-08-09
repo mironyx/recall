@@ -31,8 +31,10 @@ class EmbeddingsProvider(ABC):
         ...
 
 
-# TODO(#89): call validate_dim at store creation (E1.4) with
-# EMBEDDINGS_DIM from env, before PostgresIndexConfig is built.
+# TODO(#91): call validate_dim at store creation with EMBEDDINGS_DIM from
+# env, before PostgresIndexConfig is built. Deferred from E1.4 (#89) — the
+# storage adapter wraps an injected store and has no creation call site;
+# store creation lives at the composition root (E1.6, issue #91).
 # Justification: LLD BDD spec test_dim_mismatch_fails_fast (§LLD-e1-embedder)
 # requires the fail-fast check but names no mechanism; this pure function is
 # that mechanism. Not in the LLD's decomposition table — lld-sync will add it.
