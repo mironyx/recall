@@ -9,7 +9,7 @@
   consumer in v1 (LangGraph `AsyncPostgresStore`) invokes the embed callable **synchronously**
   inside a thread-pool executor (`aput → run_in_executor → batch → embed_documents`); an
   async-only callable raises at runtime ("EmbeddingsLambda was initialized with an async
-  function but no sync function" — verified in installed langgraph 0.2.x source). A sync
+  function but no sync function" — verified in installed langgraph 1.1.9 source). A sync
   interface needs zero bridge code at every wiring point (conftest now, store wiring in E1.4).
   ADR-0008's interface sketch is sync-shaped (`embed(texts) -> list[Vector]`, no await) and
   its "don't block the event loop" intent is already guaranteed by langgraph's executor;
@@ -28,3 +28,5 @@
 | 6    | 2026-08-09T12:16:04Z | $0.0000 | 0 in / 0 out | diag pass (CodeScene 10.0 x4; no SonarQube project; no editor diagnostics) |
 | 6b   | 2026-08-09T12:19:08Z | $0.0000 | 0 in / 0 out | evaluator: PASS WITH WARNINGS (3 adversarial tests added) |
 | 8    | 2026-08-09T12:19:46Z | $0.0000 | 0 in / 0 out | [PR #113](https://github.com/mironyx/recall/pull/113) |
+| 9    | 2026-08-09T12:27:52Z | $0.0000 | 0 in / 0 out | review re-run: 1 block fixed (Justification), 2 warns tracked (TODO #89, lld-sync) |
+| 10   | 2026-08-09T12:27:52Z | $0.0000 | 0 in / 0 out | report to lead; CI reconciled (pre-existing lint failures only) |
