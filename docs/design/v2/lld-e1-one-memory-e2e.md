@@ -10,11 +10,12 @@
 | Task issues | #86 (E1.1), #87 (E1.2), #88 (E1.3), #89 (E1.4), #90 (E1.5), #91 (E1.6) |
 | HLD components | Auth, Project Registry (deferred — ADR-0014), Embedder, Memory Service, Tool Router, MCP Transport |
 | ADRs | 0001 (flat schema), 0002 (namespace), 0004 (filters), 0006 (transport), 0007 (auth), 0008 (embeddings), 0011 (logging), 0014 (defer project registry, supersedes 0009) |
-| Status | Approved |
+| Status | Revised |
 | Date | 2026-04-12 |
 | Last revised | 2026-08-06 — synced with ADR-0014 (deferred project registry), migrated to docs/design/v2/, added LLD anchors for coverage manifest |
 | Revised | 2026-08-09 — synced with E1.1 implementation (issue #86): case-insensitive Bearer scheme, user_id string validation, RECALL_AUTH_FILE wiring deferred to E1.6 |
 | Revised | 2026-08-09 — synced with E1.2 implementation (issue #87): `.fullmatch()` replaces `.match()` (trailing-newline gap); ValidationError(RecallError) shape deferred to E1.6 (#91); wave-table shared-files correction |
+| Revised | 2026-08-09 — E1.3 (#88) implemented: sync `embed()` interface (see implementation note), `validate_dim` added |
 
 ---
 
@@ -492,7 +493,7 @@ class EmbeddingsProvider(ABC):
         ...
 
     @abstractmethod
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a batch of texts.
 
         Args:
@@ -500,20 +501,31 @@ class EmbeddingsProvider(ABC):
 
         Returns:
             One vector per input text, each of length self.dim.
-
-        Raises:
-            EmbeddingError: if generation fails after retry.
         """
         ...
 ```
 
 **Key details:**
-- The interface is `async` because the OpenAI provider (E4) will make HTTP
-  calls. The stub provider can implement it synchronously via
-  `run_in_executor` or simply return immediately (hash computation is fast).
 - `dim` is a property, not a method — it's a fixed value per provider instance.
 - The stub from E0.5 (`StubEmbeddingsProvider`) implements this interface.
   It moves from a plain class to inheriting `EmbeddingsProvider`.
+- `validate_dim(provider, configured_dim)` is the fail-fast check for
+  EMBEDDINGS_DIM vs the provider's dim; the startup call site lands in E1.4
+  (store creation, issue #89).
+
+> **Implementation note (issue #88):** `embed()` was specified as `async` but
+> was built **synchronous**. The only v1 consumer — LangGraph's
+> `AsyncPostgresStore` — invokes the embed callable synchronously inside a
+> thread-pool executor (`aput → run_in_executor → batch → embed_documents`);
+> an async-only callable raises at runtime ("EmbeddingsLambda was initialized
+> with an async function but no sync function"). A sync interface needs zero
+> bridge code at every wiring point, ADR-0008's interface sketch is
+> sync-shaped (`embed(texts) -> list[Vector]`, no await), and langgraph's
+> executor already guarantees the event loop is not blocked — E4's HTTP
+> provider can use a sync client inside that thread. The `Raises:
+> EmbeddingError` clause was dropped: retry/error machinery is provider-level
+> (E4), not interface-level; `EmbeddingError` itself remains designed in
+> `errors.py` (§ errors module).
 
 <a id="LLD-e1-storage-adapter"></a>
 
@@ -1002,7 +1014,7 @@ MEMORY_GET_SCHEMA = {
 |--------|---------------|----------|
 | `auth.py` | Token lookup, user_id resolution | Pure function, no I/O |
 | `validation.py` | Project_id format check, reserved-name guard | Pure function, no I/O (ADR-0014) |
-| `embeddings/provider.py` | Abstract interface | No implementation |
+| `embeddings/provider.py` | EmbeddingsProvider ABC, `validate_dim` fail-fast check | Pure, no I/O |
 | `embeddings/stub.py` | Deterministic test/dev provider | No I/O |
 | `storage_adapter.py` | Namespace construction, scope invariant, delegate to store | Thin wrapper over AsyncPostgresStore |
 | `memory_service.py` | Orchestrate save (build value → put) and get (index lookup → aget) | Depends on storage adapter only |

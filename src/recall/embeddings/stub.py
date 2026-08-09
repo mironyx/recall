@@ -6,8 +6,10 @@ import hashlib
 import math
 import struct
 
+from recall.embeddings.provider import EmbeddingsProvider
 
-class StubEmbeddingsProvider:
+
+class StubEmbeddingsProvider(EmbeddingsProvider):
     """Produces deterministic vectors from input text via hashing.
 
     Implements the EmbeddingsProvider interface (ADR-0008):
@@ -16,7 +18,12 @@ class StubEmbeddingsProvider:
     """
 
     def __init__(self, dim: int = 384) -> None:
-        self.dim = dim
+        self._dim = dim
+
+    @property
+    def dim(self) -> int:
+        """The dimensionality of produced vectors."""
+        return self._dim
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Return one vector per input text. Deterministic and normalised."""

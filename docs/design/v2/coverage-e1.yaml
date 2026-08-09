@@ -25,8 +25,10 @@ entries:
   - req: REQ-story-13-embedding-generation-on-save
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-embedder
     issue: 88
-    files: []
-    status: Approved
+    files:
+      - src/recall/embeddings/provider.py
+      - src/recall/embeddings/stub.py
+    status: Revised
     lld_revision: r1
     # Stub provider only in Phase 1. Real providers deferred to Phase 4 (E4.1).
 
