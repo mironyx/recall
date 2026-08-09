@@ -12,7 +12,7 @@
 
 A small, focused MCP server that gives coding agents persistent memory across sessions, machines, and projects.
 
-**Current phase:** Phase 0 — Foundation. See [implementation plan](docs/plans/2026-04-12-v2-implementation-plan.md) and [HLD](docs/design/v2-design.md).
+See [implementation plan](docs/plans/2026-04-12-v2-implementation-plan.md) and [HLD](docs/design/v2-design.md).
 
 **Read [REQUIREMENTS.md](docs/requirements/v2-requirements.md) before starting any non-trivial change.**
 
@@ -41,7 +41,7 @@ A small, focused MCP server that gives coding agents persistent memory across se
 - **TDD-first.** Failing test before implementation. Integration tests hit real Postgres; never mock the store.
 - **Issue-driven.** No work without a GitHub issue. Epics group tasks.
 - **ADRs for non-obvious decisions.** Stored in [docs/adr/](docs/adr/).
-- **LLDs per task.** `docs/design/lld-<epic-slug>-<task-slug>.md`.
+- **LLDs per epic.** `docs/design/v{N}/lld-<epic-id>-<name>.md`. All LLDs live in the versioned directory, never flat.
 - **Small PRs.** One logical change per PR.
 
 ## Verification (script contract)
@@ -108,4 +108,6 @@ Pipeline: `requirements → /kickoff → /architect → /feature → /feature-en
 
 ## Task tracking
 
-GitHub Issues + Project #3. Labels: `epic`, `phase-0`–`phase-5`, `area:*`, `kind:task`. Manage via `./scripts/gh-project-status.sh`.
+GitHub Issues + Project Board #3 (`recall-v1`). Labels: `epic`, `phase-0`–`phase-5`, `area:*`, `kind:task`. Manage via `./scripts/gh-project-status.sh`.
+
+**Board verification (blocking):** after creating or modifying issues, run `gh project item-list 3 --owner mironyx` to confirm every issue appears on the board. Never assume placement — verify it.
