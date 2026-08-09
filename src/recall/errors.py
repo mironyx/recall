@@ -29,3 +29,11 @@ class UnauthenticatedError(RecallError):
 
 class ValidationError(Exception):
     """Raised when input fails validation at the API boundary."""
+
+
+class NotFoundError(RecallError):
+    def __init__(self, memory_id: str) -> None:
+        super().__init__(
+            error="not_found",
+            hint=f"Memory '{memory_id}' does not exist. Verify the ID or search first.",
+        )

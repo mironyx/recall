@@ -11,10 +11,17 @@ from langgraph.store.postgres.base import PostgresIndexConfig
 
 _DEFAULT_DIMS = 1536
 
+# TODO(#90): DROP+ADD re-validates the whole store table on every
+# ensure_schema run (each startup). Acceptable while the store is small;
+# move the exception to a one-time migration (src/recall/migrations/) if
+# the table grows. The duplicate_object guard covers concurrent migration
+# runs, where a racing ADD is the second one to fail.
 _SCOPE_CHECK_SQL = """\
+ALTER TABLE store DROP CONSTRAINT IF EXISTS store_scope_invariant;
 DO $$ BEGIN
     ALTER TABLE store ADD CONSTRAINT store_scope_invariant CHECK (
         prefix = 'global._'
+        OR prefix = '_index._'
         OR (prefix LIKE 'project.%' AND prefix != 'project._')
     );
 EXCEPTION WHEN duplicate_object THEN NULL;
@@ -42,7 +49,9 @@ async def ensure_schema(conn_string: str) -> None:
     """Create all required tables and constraints.  Idempotent.
 
     1. ``AsyncPostgresStore.setup()`` — ``store``, ``store_vectors``, internal ledgers.
-    2. Scope CHECK constraint on the ``store`` table (ADR-0001 / ADR-0002).
+    2. Scope CHECK constraint on the ``store`` table (ADR-0001 / ADR-0002), with
+       a single exception: the internal reverse-index namespace ``_index._``
+       (E1.5 memory_service) is permitted outside the memory-scope invariant.
 
     The ``projects`` table is deferred (ADR-0014).
     """

@@ -132,6 +132,20 @@ class TestScopeConstraint:
             )
             await conn.commit()
 
+    async def test_happy_path_index_namespace(self, migrated_db: str) -> None:
+        """INSERT with prefix='_index._' succeeds — the internal reverse-index
+        namespace (E1.5 memory_service) is the sole exception to the
+        memory-scope invariant (Issue #90)."""
+        async with (
+            await psycopg.AsyncConnection.connect(migrated_db) as conn,
+            conn.cursor() as cur,
+        ):
+            await cur.execute(
+                "INSERT INTO store (prefix, key, value) VALUES (%s, %s, %s::jsonb)",
+                ("_index._", "k1", "{}"),
+            )
+            await conn.commit()
+
     async def test_constraint_exists(self, migrated_db: str) -> None:
         """Named CHECK constraint 'store_scope_invariant' is registered."""
         async with (
