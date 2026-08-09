@@ -26,7 +26,8 @@
 
 Deliver the smallest vertical slice that touches every component on the request
 path: a bearer-authenticated agent calls `memory_save` to persist a
-project-scoped memory (with embedding), then `memory_get` to retrieve it by ID,
+project-scoped memory (with embedding), then `memory_get` to retrieve it by
+ID within its `(scope, project_id)` namespace,
 over real Streamable HTTP, against real Postgres, with one structured log line
 per call. After Phase 1 the architecture is real, not sketched.
 
@@ -85,9 +86,9 @@ sequenceDiagram
     Agent->>Transport: POST /mcp (memory_get)
     Transport->>Auth: authenticate(Authorization header)
     Auth-->>Transport: user_id
-    Transport->>Router: dispatch("memory_get", {id}, user_id)
-    Router->>MS: get_by_id(id)
-    MS->>SA: get(namespace_from_id, key)
+    Transport->>Router: dispatch("memory_get", {scope, project_id, id}, user_id)
+    Router->>MS: get_by_id(scope, project_id, id)
+    MS->>SA: get(scope, project_id, key)
     SA->>DB: AsyncPostgresStore.aget(...)
     DB-->>SA: Item | None
     alt found
@@ -225,11 +226,11 @@ class TestMemoryGetEndToEnd:
         self, mcp_client, saved_memory_id
     ) -> None:
         """Given a saved memory,
-        when memory_get is called with its id,
+        when memory_get is called with its scope, project_id and id,
         then the full record is returned with all fields."""
 
     async def test_get_not_found(self, mcp_client) -> None:
-        """Given a non-existent id,
+        """Given a non-existent id in a known namespace,
         when memory_get is called,
         then {error: 'not_found'} is returned."""
 
@@ -723,29 +724,33 @@ class MemoryService:
 
         return memory_id
 
-    async def get_by_id(self, memory_id: str) -> dict[str, Any]:
-        """Retrieve a memory by ID.
+    async def get_by_id(
+        self, scope: str, project_id: str, memory_id: str
+    ) -> dict[str, Any]:
+        """Retrieve a memory by ID within its known namespace.
 
-        Uses a reverse index stored in namespace ("_index", "_"): on save,
-        an index entry mapping memory_id → (scope, project_id) is also
-        persisted. On get_by_id, the index is consulted first to find
-        the correct namespace, then the actual record is fetched.
+        The (scope, project_id) namespace is provided by the caller
+        (ADR-0015) — search results carry it, and id-only resolution is
+        intentionally unsupported. get is a direct namespaced read.
 
         Raises:
             NotFoundError: memory not found.
         """
-        ...
+        item = await self._storage.get(scope, project_id, memory_id)
+        if item is None:
+            raise NotFoundError(memory_id)
+        return {"id": memory_id, **item.value}
 ```
 
-**Design note — memory_get ID resolution:**
+**Design note — memory_get scope resolution (ADR-0015):**
 
-The `AsyncPostgresStore.aget()` requires a namespace tuple + key. The MCP
-tool `memory_get` accepts only an `id`. **Chosen approach: a reverse index
-in the store itself.** On `save`, also `aput` into namespace `("_index", "_")`
-with key=memory_id and value=`{"scope": scope, "project_id": project_id}`.
-On `get_by_id`, first `aget` the index entry to find the namespace, then
-`aget` the actual record. Two reads per get, but gets are infrequent compared
-to search. The index entry has `index=False` (no embedding needed).
+The MCP tool `memory_get` takes `scope`, `project_id`, and `id` explicitly —
+**no reverse index.** The original id-only contract (issue #90 AC2/AC3,
+`("_index", "_")` index) was dropped per ADR-0015: there is no user-level
+use case for id-only operations — search results already carry the scope —
+and the index would turn save() into two non-atomic writes while widening
+the storage namespace beyond `(scope, project_id)` (ADR-0002). `save()` is
+a single write; `get_by_id` is a direct namespaced read.
 
 <a id="LLD-e1-models"></a>
 
@@ -974,10 +979,16 @@ class ToolRouter:
         self, params: dict[str, Any]
     ) -> dict[str, Any]:
         """Validate and delegate memory_get."""
+        scope = params.get("scope", "")
+        project_id = params.get("project_id", "")
         memory_id = params.get("id", "")
-        if not memory_id:
-            raise ValidationError("Missing required field: id")
-        record = await self._memory_service.get_by_id(memory_id)
+        if not (scope and project_id and memory_id):
+            raise ValidationError(
+                "Missing required field: scope, project_id, id"
+            )
+        record = await self._memory_service.get_by_id(
+            scope, project_id, memory_id
+        )
         return record
 ```
 
@@ -1023,6 +1034,9 @@ MEMORY_GET_SCHEMA = {
         "finding a memory via memory_search to read the full content "
         "(search returns snippets only).\n\n"
         "Parameters:\n"
+        "- scope (required): \"project\" or \"global\" — the memory's scope\n"
+        "- project_id (required): the project the memory belongs to (\"_\"\n"
+        "  for global)\n"
         "- id (required): the memory ID returned by memory_save or memory_search"
     ),
 }
@@ -1039,7 +1053,7 @@ MEMORY_GET_SCHEMA = {
 | `embeddings/provider.py` | EmbeddingsProvider ABC, `validate_dim` fail-fast check | Pure, no I/O |
 | `embeddings/stub.py` | Deterministic test/dev provider | No I/O |
 | `storage_adapter.py` | Namespace construction, scope invariant, delegate to store | Thin wrapper over AsyncPostgresStore |
-| `memory_service.py` | Orchestrate save (build value → put) and get (index lookup → aget) | Depends on storage adapter only |
+| `memory_service.py` | Orchestrate save (build value → put) and get (direct namespaced read, ADR-0015) | Depends on storage adapter only |
 | `tool_router.py` | Dispatch, validation, error formatting, logging | Depends on service + auth |
 | `models.py` | Pydantic models for the flat value schema | Pure data |
 | `errors.py` | Domain error types with {error, hint} shape | Pure data |
@@ -1054,7 +1068,7 @@ MEMORY_GET_SCHEMA = {
 | 2 | E1.2 | Project ID validation — format check, reserved-name guard (ADR-0014) | `src/recall/validation.py`, `src/recall/errors.py` (ValidationError), `tests/test_validation.py` | E0.1 |
 | 3 | E1.3 | Embedder interface + stub upgrade | `src/recall/embeddings/provider.py`, `src/recall/embeddings/stub.py`, `tests/test_embeddings.py` | E0.5 |
 | 4 | E1.4 | Storage adapter — put/get with namespace construction | `src/recall/storage_adapter.py`, `src/recall/models.py`, `tests/test_storage_adapter.py` | E1.3 |
-| 5 | E1.5 | Memory Service — save + get_by_id with reverse index | `src/recall/memory_service.py`, `tests/test_memory_service.py` | E1.4 |
+| 5 | E1.5 | Memory Service — save + get_by_id (scope-explicit, ADR-0015) | `src/recall/memory_service.py`, `tests/test_memory_service.py` | E1.4 |
 | 6 | E1.6 | Tool Router + MCP wiring for memory_save + memory_get | `src/recall/tool_router.py`, `src/recall/server.py`, `tests/test_tool_router.py`, `tests/test_e2e_phase1.py` | E1.1, E1.2, E1.5 |
 
 <a id="LLD-e1-execution-waves"></a>

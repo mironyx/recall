@@ -2,8 +2,7 @@
 
 Contract sources:
 - ``docs/design/v2/lld-e1-one-memory-e2e.md`` §E1.5 (anchor ``LLD-e1-memory-service``)
-  — save (flat value + index=["content"]) and get_by_id with the reverse index
-  in namespace ("_index", "_")
+  — save (flat value + index=["content"]) and scope-explicit get_by_id (ADR-0015)
 - ``docs/requirements/v2-requirements.md`` — Story 1.1 (store), Story 1.2 (scope
   invariant), Story 1.3 AC1/AC4 (embedding on save), Story 2.4 (get full record),
   Story 5.4 (storage namespace)
@@ -12,8 +11,8 @@ Contract sources:
 Design notes:
 - The unit under test is ``recall.memory_service.MemoryService``. Integration
   tests hit real Postgres+pgvector via the session-scoped ``store`` fixture
-  (ADR-0012); the store is never mocked (CLAUDE.md). Reverse-index and
-  embedding state are observed through the raw store and SQL, following the
+  (ADR-0012); the store is never mocked (CLAUDE.md). Embedding state is
+  observed through the raw store and SQL, following the
   ``test_storage_adapter.py`` conventions.
 - ``recall.errors.ValidationError`` is still the bare form pending issue #91
   (see TODO in ``src/recall/errors.py``), so invariant tests assert the
@@ -112,8 +111,8 @@ async def service(store: AsyncPostgresStore) -> MemoryService:
 
 @pytest.mark.integration
 class TestMemoryServiceSave:
-    """Issue #90 AC1/AC2/AC5 — save() builds the flat value, embeds content,
-    writes the reverse index, and enforces the scope invariant."""
+    """Issue #90 AC1/AC5 — save() builds the flat value, embeds content, and
+    enforces the scope invariant (single write, ADR-0015)."""
 
     async def test_save_returns_generated_uuid_id(self, service: MemoryService) -> None:
         """Given a valid project-scoped request, when save() is called, then a
@@ -125,7 +124,7 @@ class TestMemoryServiceSave:
 
         assert uuid.UUID(first_id).version == 4
         assert first_id != second_id
-        assert (await service.get_by_id(first_id))["id"] == first_id
+        assert (await service.get_by_id("project", "proj-42", first_id))["id"] == first_id
 
     async def test_save_persists_flat_value_at_root(
         self, service: MemoryService, pg_conn_string: str
@@ -186,35 +185,16 @@ class TestMemoryServiceSave:
         kind='decision', so the free-form property was unexercised."""
         memory_id = await service.save(**_save_args(kind="custom-schema-2026"))
 
-        record = await service.get_by_id(memory_id)
+        record = await service.get_by_id("project", "proj-42", memory_id)
         assert record["kind"] == "custom-schema-2026"
 
-    async def test_save_embeds_content_but_not_index_entry(
-        self, service: MemoryService, pg_conn_string: str
-    ) -> None:
+    async def test_save_embeds_content(self, service: MemoryService, pg_conn_string: str) -> None:
         """Given a save(), then exactly one store_vectors row exists for the
-        memory (prefix 'project.proj-42') and none for the reverse-index entry
-        (prefix '_index._') — index=["content"] for the memory, index=False
-        for the index entry (Issue #90 AC1/AC2; Story 1.3 AC1; LLD design
-        note)."""
+        memory (prefix 'project.proj-42') — index=["content"] on the single
+        write (Issue #90 AC1; Story 1.3 AC1)."""
         memory_id = await service.save(**_save_args())
 
         assert await _vector_row_count(pg_conn_string, memory_id, "project.proj-42") == 1
-        assert await _vector_row_count(pg_conn_string, memory_id, "_index._") == 0
-
-    async def test_save_writes_reverse_index_entry(
-        self, service: MemoryService, store: AsyncPostgresStore
-    ) -> None:
-        """Given a save(), then the reverse index in namespace ("_index", "_")
-        maps the memory id to {"scope", "project_id"} so get_by_id can resolve
-        the namespace (Issue #90 AC2; LLD design note)."""
-        memory_id = await service.save(**_save_args())
-
-        entry = await store.aget(("_index", "_"), memory_id)
-
-        assert entry is not None
-        assert entry.namespace == ("_index", "_")
-        assert entry.value == {"scope": "project", "project_id": "proj-42"}
 
     async def test_saved_memory_is_findable_by_semantic_search(
         self, service: MemoryService, store: AsyncPostgresStore
@@ -232,9 +212,9 @@ class TestMemoryServiceSave:
         self, service: MemoryService, store: AsyncPostgresStore, pg_conn_string: str
     ) -> None:
         """Given scope='global' and project_id='_', when save() is called, then
-        the memory is stored under ('global', '_') with a matching reverse-index
-        entry and get_by_id resolves it — cross-scope get works (Story 5.4 AC2;
-        LLD BDD test_save_global_memory; Issue #90 AC3)."""
+        the memory is stored under ('global', '_') and get_by_id reads it
+        directly — cross-scope get works (Story 5.4 AC2; LLD BDD
+        test_save_global_memory)."""
         memory_id = await service.save(**_save_args(scope="global", project_id=GLOBAL_SENTINEL))
 
         item = await store.aget(("global", GLOBAL_SENTINEL), memory_id)
@@ -242,11 +222,7 @@ class TestMemoryServiceSave:
         assert item.value["scope"] == "global"
         assert item.value["project_id"] == GLOBAL_SENTINEL
 
-        entry = await store.aget(("_index", "_"), memory_id)
-        assert entry is not None
-        assert entry.value == {"scope": "global", "project_id": GLOBAL_SENTINEL}
-
-        record = await service.get_by_id(memory_id)
+        record = await service.get_by_id("global", GLOBAL_SENTINEL, memory_id)
         assert record["scope"] == "global"
         assert record["project_id"] == GLOBAL_SENTINEL
 
@@ -267,7 +243,7 @@ class TestMemoryServiceSave:
     ) -> None:
         """Given a (scope, project_id) pair that violates the invariant, when
         save() is called, then ValidationError is raised and nothing is
-        persisted — no memory row and no reverse-index entry (Issue #90 AC5;
+        persisted — no memory row (Issue #90 AC5;
         Story 1.2 AC2/AC4/AC5)."""
         with pytest.raises(ValidationError):
             await service.save(**_save_args(scope=scope, project_id=project_id))
@@ -328,19 +304,20 @@ class TestMemoryServiceSave:
 
 @pytest.mark.integration
 class TestMemoryServiceGet:
-    """Issue #90 AC3/AC4 — get_by_id resolves the namespace via the reverse
-    index and returns the full record."""
+    """Issue #90 AC4 — get_by_id takes (scope, project_id, id) and returns
+    the full record directly (ADR-0015)."""
 
     async def test_get_by_id_returns_full_record(self, service: MemoryService) -> None:
-        """Given a saved memory, when get_by_id is called with its id, then the
-        full record is returned — id plus all ten flat fields with the stored
-        values, satisfying the MemoryResponse model (Story 2.4 AC1; LLD
-        invariant I6; BDD test_get_by_id_returns_full_record)."""
+        """Given a saved memory, when get_by_id is called with its scope,
+        project_id and id, then the full record is returned — id plus all ten
+        flat fields with the stored values, satisfying the MemoryResponse
+        model (Story 2.4 AC1; LLD invariant I6; BDD
+        test_get_by_id_returns_full_record)."""
         memory_id = await service.save(
             **_save_args(tags=["architecture"], metadata={"source": "adr-0001"})
         )
 
-        record = await service.get_by_id(memory_id)
+        record = await service.get_by_id("project", "proj-42", memory_id)
 
         assert record["id"] == memory_id
         assert record["scope"] == "project"
@@ -355,27 +332,12 @@ class TestMemoryServiceGet:
         MemoryResponse(**record)
 
     async def test_get_by_id_not_found(self, service: MemoryService) -> None:
-        """Given an id that was never saved, when get_by_id is called, then
-        NotFoundError is raised with the structured not_found shape; a
-        non-UUID string id is treated the same (Story 2.4 AC2; Issue #90 AC4;
-        BDD test_get_by_id_not_found)."""
+        """Given an id that was never saved, when get_by_id is called with a
+        known namespace, then NotFoundError is raised with the structured
+        not_found shape; a non-UUID string id is treated the same (Story 2.4
+        AC2; Issue #90 AC4; BDD test_get_by_id_not_found)."""
         for unknown_id in (str(uuid.uuid4()), "not-a-uuid"):
             with pytest.raises(NotFoundError) as exc_info:
-                await service.get_by_id(unknown_id)
+                await service.get_by_id("project", "proj-42", unknown_id)
             assert exc_info.value.error == "not_found"
             assert unknown_id in exc_info.value.hint
-
-    async def test_get_by_id_resolves_namespace_via_reverse_index(
-        self, service: MemoryService, store: AsyncPostgresStore
-    ) -> None:
-        """Given a saved memory whose reverse-index entry is removed, when
-        get_by_id is called, then NotFoundError is raised even though the
-        memory itself still exists — the id is resolved through the index
-        (Issue #90 AC3; LLD design note)."""
-        memory_id = await service.save(**_save_args())
-
-        await store.adelete(("_index", "_"), memory_id)
-        assert await store.aget(("project", "proj-42"), memory_id) is not None
-
-        with pytest.raises(NotFoundError):
-            await service.get_by_id(memory_id)

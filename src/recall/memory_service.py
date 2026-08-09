@@ -11,7 +11,7 @@ from recall.storage_adapter import StorageAdapter
 
 
 class MemoryService:
-    """Orchestrates memory operations: build value, delegate to storage, resolve get-by-id."""
+    """Orchestrates memory operations: build value, delegate to storage, direct get-by-id."""
 
     def __init__(self, storage: StorageAdapter) -> None:
         self._storage = storage
@@ -33,7 +33,7 @@ class MemoryService:
         2. Build the flat value dict (ADR-0001).
         3. Delegate to StorageAdapter — AsyncPostgresStore handles embedding
            internally via PostgresIndexConfig when index=["content"] is passed.
-        4. Write the reverse index entry (id → namespace) for get_by_id.
+        4. Return the generated ID.
 
         Args:
             scope: "project" or "global".
@@ -68,8 +68,8 @@ class MemoryService:
             "updated_at": now,
         }
 
-        # Memory first, index second: if embedding fails or the invariant is
-        # violated, nothing is persisted at all (Story 1.3 AC4).
+        # Single write: if embedding fails or the invariant is violated,
+        # nothing is persisted at all (Story 1.3 AC4).
         await self._storage.put(
             scope=scope,
             project_id=project_id,
@@ -78,28 +78,14 @@ class MemoryService:
             index=["content"],  # embed the content field
         )
 
-        # TODO(#90): save() is two non-atomic writes — if the index write
-        # fails after the memory write, the memory stays searchable but
-        # get_by_id raises NotFoundError. AsyncPostgresStore exposes no
-        # multi-write transaction; revisit if orphaned memories surface.
-        # Reverse index: ("_index", "_") is outside the adapter's (scope,
-        # project_id) domain, so it goes to the wrapped raw store directly.
-        await self._storage._store.aput(
-            ("_index", "_"),
-            memory_id,
-            {"scope": scope, "project_id": project_id},
-            index=False,
-        )
-
         return memory_id
 
-    async def get_by_id(self, memory_id: str) -> dict[str, Any]:
-        """Retrieve a memory by ID.
+    async def get_by_id(self, scope: str, project_id: str, memory_id: str) -> dict[str, Any]:
+        """Retrieve a memory by ID within its known namespace.
 
-        Uses a reverse index stored in namespace ("_index", "_"): on save,
-        an index entry mapping memory_id → (scope, project_id) is also
-        persisted. On get_by_id, the index is consulted first to find
-        the correct namespace, then the actual record is fetched.
+        The (scope, project_id) namespace is provided by the caller
+        (ADR-0015) — search results carry it, and id-only resolution is
+        intentionally unsupported. get is a direct namespaced read.
 
         Returns:
             The full record dict — the flat value plus the memory id — which
@@ -108,12 +94,6 @@ class MemoryService:
         Raises:
             NotFoundError: memory not found.
         """
-        entry = await self._storage._store.aget(("_index", "_"), memory_id)
-        if entry is None:
-            raise NotFoundError(memory_id)
-        scope: str = entry.value["scope"]
-        project_id: str = entry.value["project_id"]
-
         item = await self._storage.get(scope, project_id, memory_id)
         if item is None:
             raise NotFoundError(memory_id)
