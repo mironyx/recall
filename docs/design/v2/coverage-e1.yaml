@@ -52,7 +52,9 @@ entries:
   - req: REQ-story-41-streamable-http-transport
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-tool-router
     issue: 91
-    files: []
+    files:
+      - src/recall/server.py
+      - src/recall/tool_router.py
     status: Revised
     lld_revision: r1
     # Revised: lld-sync (issue #91) — transport corrected to the 2026-07-28
@@ -63,8 +65,10 @@ entries:
   - req: REQ-story-43-structured-error-responses
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-errors
     issue: 91
-    files: []
-    status: Approved
+    files:
+      - src/recall/errors.py
+      - src/recall/tool_router.py
+    status: Implemented
     lld_revision: r1
     # Partial coverage: only Phase 1 error codes. Full vocabulary deferred to Phase 3 (E3.3).
 
