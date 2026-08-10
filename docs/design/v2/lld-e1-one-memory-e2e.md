@@ -18,6 +18,7 @@
 | Revised | 2026-08-09 — E1.3 (#88) implemented: sync `embed()` interface (see implementation note), `validate_dim` added |
 | Revised | 2026-08-09 — E1.4 (#89) implemented: `validate_dim` call-site corrected to E1.6 (#91); `validate_dim` added to provider.py code block |
 | Revised | 2026-08-10 — E1.5 (#90) implemented: scope-explicit `get_by_id` per ADR-0015 (reverse index dropped, single-write `save`); code block synced to shipped code |
+| Revised | 2026-08-10 — E1.6 (#91) implemented: ToolRouter ships without `auth_config` (auth resolved at the transport from `ServerRequestContext.request.headers`); scope invariant enforced in `_resolve_save_namespace` with GLOBAL_SENTINEL fill; `mcp_call` via extracted `_log_call`; transport corrected to the 2026-07-28 protocol revision (mcp SDK 2.0.0 — dispatcher `Server(on_list_tools/on_call_tool)`, `streamable_http_app` mounted at `/`, no initialize handshake); new LLD-e1-mcp-wiring section; code blocks synced to shipped code |
 
 ---
 
@@ -866,7 +867,14 @@ class EmbeddingError(RecallError):
 from __future__ import annotations
 
 import time
+from typing import Any
+
 import structlog
+
+from recall.errors import RecallError, ValidationError
+from recall.memory_service import MemoryService
+from recall.storage_adapter import GLOBAL_SENTINEL
+from recall.validation import validate_project_id_format
 
 log = structlog.get_logger()
 
@@ -881,13 +889,8 @@ class ToolRouter:
     - Emit one mcp_call log event per call (ADR-0011)
     """
 
-    def __init__(
-        self,
-        memory_service: MemoryService,
-        auth_config: AuthConfig,
-    ) -> None:
+    def __init__(self, memory_service: MemoryService) -> None:
         self._memory_service = memory_service
-        self._auth_config = auth_config
 
     async def handle_tool_call(
         self,
@@ -897,41 +900,38 @@ class ToolRouter:
     ) -> dict[str, Any]:
         """Dispatch a tool call with logging and error handling.
 
-        Args:
-            tool_name: The MCP tool name.
-            params: The tool parameters.
-            user_id: Resolved from auth.
-
-        Returns:
-            The tool result dict.
-
-        Raises:
-            Nothing — errors are caught and returned as structured dicts.
+        Returns the tool result dict. Only RecallError is caught (Story 4.3
+        AC4) and returned as a structured {error, hint} dict; unexpected
+        failures propagate to the transport layer.
         """
         start = time.monotonic()
         try:
             result = await self._dispatch(tool_name, params, user_id)
-            elapsed = (time.monotonic() - start) * 1000
-            log.info(
-                "mcp_call",
-                tool=tool_name,
-                user_id=user_id,
-                project_id=params.get("project_id", ""),
-                latency_ms=round(elapsed, 1),
-                result_status="ok",
-            )
-            return result
-        except RecallError as e:
-            elapsed = (time.monotonic() - start) * 1000
-            log.info(
-                "mcp_call",
-                tool=tool_name,
-                user_id=user_id,
-                project_id=params.get("project_id", ""),
-                latency_ms=round(elapsed, 1),
-                result_status=e.error,
-            )
-            return {"error": e.error, "hint": e.hint}
+        except RecallError as exc:
+            self._log_call(tool_name, params, user_id, start, exc.error)
+            return {"error": exc.error, "hint": exc.hint}
+        self._log_call(tool_name, params, user_id, start, "ok")
+        return result
+
+    @staticmethod
+    def _log_call(
+        tool_name: str,
+        params: dict[str, Any],
+        user_id: str,
+        start: float,
+        result_status: str,
+    ) -> None:
+        """Emit the single mcp_call event for this tool call (ADR-0011)."""
+        log.info(
+            "mcp_call",
+            tool=tool_name,
+            user_id=user_id,
+            # project_id may be absent for global-scope calls or validation
+            # failures before scope resolution; the event stays well-formed.
+            project_id=params.get("project_id", ""),
+            latency_ms=round((time.monotonic() - start) * 1000, 2),
+            result_status=result_status,
+        )
 
     async def _dispatch(
         self,
@@ -942,110 +942,245 @@ class ToolRouter:
         """Route to the appropriate service method."""
         if tool_name == "memory_save":
             return await self._handle_memory_save(params, user_id)
-        elif tool_name == "memory_get":
+        if tool_name == "memory_get":
             return await self._handle_memory_get(params)
-        else:
-            raise ValidationError(f"Unknown tool: {tool_name}")
+        raise ValidationError(f"Unknown tool: {tool_name}")
 
-    async def _handle_memory_save(
-        self, params: dict[str, Any], user_id: str
-    ) -> dict[str, Any]:
+    async def _handle_memory_save(self, params: dict[str, Any], user_id: str) -> dict[str, Any]:
         """Validate and delegate memory_save."""
-        # Extract and validate params
-        scope = params.get("scope", "")
-        project_id = params.get("project_id", "_" if scope == "global" else "")
-        kind = params.get("kind", "")
-        title = params.get("title", "")
-        content = params.get("content", "")
+        # Story 1.1 AC4 — the boundary treats empty and missing alike.
+        missing = self._missing_fields(params, ("scope", "kind", "title", "content"))
+        if missing:
+            raise ValidationError(f"Missing required field: {missing[0]}")
 
-        # Validate required fields
-        for field_name, value in [("scope", scope), ("kind", kind),
-                                   ("title", title), ("content", content)]:
-            if not value:
-                raise ValidationError(f"Missing required field: {field_name}")
-
-        # Validate project_id format for project-scoped calls (ADR-0014)
-        if scope == "project":
-            validate_project_id_format(project_id)
+        scope, project_id = self._resolve_save_namespace(params)
 
         memory_id = await self._memory_service.save(
             scope=scope,
-            project_id=project_id if scope == "project" else "_",
+            project_id=project_id,
             user_id=user_id,
-            kind=kind,
-            title=title,
-            content=content,
+            kind=params.get("kind", ""),
+            title=params.get("title", ""),
+            content=params.get("content", ""),
             tags=params.get("tags"),
             metadata=params.get("metadata"),
         )
         return {"id": memory_id}
 
-    async def _handle_memory_get(
-        self, params: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _handle_memory_get(self, params: dict[str, Any]) -> dict[str, Any]:
         """Validate and delegate memory_get."""
-        scope = params.get("scope", "")
-        project_id = params.get("project_id", "")
-        memory_id = params.get("id", "")
-        if not (scope and project_id and memory_id):
-            raise ValidationError(
-                "Missing required field: scope, project_id, id"
-            )
-        record = await self._memory_service.get_by_id(
-            scope, project_id, memory_id
+        # ADR-0015 — the (scope, project_id) namespace is explicit; all three
+        # fields are required, empty and missing treated alike.
+        if self._missing_fields(params, ("scope", "project_id", "id")):
+            raise ValidationError("Missing required field: scope, project_id, id")
+
+        return await self._memory_service.get_by_id(
+            params.get("scope", ""),
+            params.get("project_id", ""),
+            params.get("id", ""),
         )
-        return record
+
+    @staticmethod
+    def _missing_fields(params: dict[str, Any], fields: tuple[str, ...]) -> list[str]:
+        """Names of required fields that are empty or absent (Story 1.1 AC4)."""
+        return [field_name for field_name in fields if not params.get(field_name, "")]
+
+    @staticmethod
+    def _resolve_save_namespace(params: dict[str, Any]) -> tuple[str, str]:
+        """Resolve the (scope, project_id) namespace for a save call.
+
+        Story 1.2 AC5 — scope is project|global only; Story 1.2 AC4 — the
+        scope invariant: global memories never carry a project_id, project
+        memories always resolve to one (ADR-0002). The saved record's
+        project_id is GLOBAL_SENTINEL for global scope.
+        """
+        scope = params.get("scope", "")
+        if scope not in ("project", "global"):
+            raise ValidationError(f"Invalid scope: {scope}")
+
+        if scope == "global":
+            if params.get("project_id"):
+                raise ValidationError("scope 'global' must not carry a project_id")
+            return scope, GLOBAL_SENTINEL
+
+        project_id = params.get("project_id", "")
+        validate_project_id_format(project_id)
+        return scope, project_id
 ```
 
 **Key change from original LLD:** `ToolRouter.__init__` no longer takes `project_registry`. Per ADR-0014, project validation is a pure format check (`validate_project_id_format()`), not a DB-backed registry lookup.
+
+> **Implementation note (issue #91):** the spec code block diverged from the
+> shipped code in four ways. (1) `ToolRouter.__init__` takes **only**
+> `memory_service` — the spec's `auth_config` was dropped: authentication is
+> resolved at the transport boundary, where the call-tool handler reads the
+> Authorization header from `ServerRequestContext.request.headers` (see
+> LLD-e1-mcp-wiring). (2) The `mcp_call` event is emitted by a single
+> extracted `_log_call` helper instead of being duplicated inline per
+> outcome — the five arguments are exactly the five event fields (ADR-0011);
+> `latency_ms` is rounded to 2 decimals. (3) The inline required-field loop
+> became the shared `_missing_fields` helper, treating empty and absent
+> alike (Story 1.1 AC4). (4) Scope resolution is extracted into
+> `_resolve_save_namespace`: it validates the scope enum (Story 1.2 AC5),
+> rejects `scope=global` carrying a `project_id` (Story 1.2 AC4 — the spec's
+> inline default silently dropped it), and fills the `GLOBAL_SENTINEL`. The
+> storage layer's `_build_namespace` keeps its own defence-in-depth invariant
+> check for callers that bypass the router.
 
 <a id="LLD-e1-mcp-tool-declarations"></a>
 
 #### MCP tool declarations
 
-The MCP SDK tool declarations are registered on the MCP server instance.
-Each tool has an agent-oriented description following Story 4.2.
+Each tool has an agent-oriented description following Story 4.2, declared as a
+description constant plus a full JSON Schema, and registered on the MCP server
+instance through the `on_list_tools` dispatcher callback.
 
 ```python
-# Tool declarations (registered in server.py MCP setup)
+# Tool declarations (src/recall/server.py — declared by the on_list_tools handler)
 
-MEMORY_SAVE_SCHEMA = {
-    "name": "memory_save",
-    "description": (
-        "Store a new memory. Use this when the agent learns something worth "
-        "remembering across sessions: a decision, convention, gotcha, or "
-        "any other durable fact.\n\n"
-        "Scope decision rule: if this fact would still be true and useful "
-        "in a brand-new empty repo tomorrow, use scope='global'. Otherwise "
-        "use scope='project'. When in doubt, prefer 'project'.\n\n"
-        "Parameters:\n"
-        "- scope (required): 'project' or 'global'\n"
-        "- project_id (required if scope='project'): the project identifier\n"
-        "- kind (required): category — e.g. 'decision', 'convention', "
-        "'gotcha', 'component', 'episode', 'instruction'\n"
-        "- title (required): short descriptive title\n"
-        "- content (required): the full memory content\n"
-        "- tags (optional): list of string tags\n"
-        "- metadata (optional): additional key-value pairs"
-    ),
-    # JSON Schema for parameters omitted for brevity — follows the
-    # tool reference table in requirements.
+MEMORY_SAVE_DESCRIPTION = (
+    "Store a new memory. Use this when the agent learns something worth "
+    "remembering across sessions: a decision, convention, gotcha, or "
+    "any other durable fact.\n\n"
+    "Scope decision rule: if this fact would still be true and useful "
+    "in a brand-new empty repo tomorrow, use scope='global'. Otherwise "
+    "use scope='project'. When in doubt, prefer 'project'.\n\n"
+    "Parameters:\n"
+    "- scope (required): 'project' or 'global'\n"
+    "- project_id (required if scope='project'): the project identifier\n"
+    "- kind (required): category — e.g. 'decision', 'convention', "
+    "'gotcha', 'component', 'episode', 'instruction'\n"
+    "- title (required): short descriptive title\n"
+    "- content (required): the full memory content\n"
+    "- tags (optional): list of string tags\n"
+    "- metadata (optional): additional key-value pairs"
+)
+
+MEMORY_SAVE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "scope": {"type": "string", "enum": ["project", "global"]},
+        "project_id": {"type": "string"},
+        "kind": {"type": "string"},
+        "title": {"type": "string"},
+        "content": {"type": "string"},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "metadata": {"type": "object"},
+    },
+    "required": ["scope", "kind", "title", "content"],
 }
 
-MEMORY_GET_SCHEMA = {
-    "name": "memory_get",
-    "description": (
-        "Fetch the complete record of a memory by its ID. Use this after "
-        "finding a memory via memory_search to read the full content "
-        "(search returns snippets only).\n\n"
-        "Parameters:\n"
-        "- scope (required): \"project\" or \"global\" — the memory's scope\n"
-        "- project_id (required): the project the memory belongs to (\"_\"\n"
-        "  for global)\n"
-        "- id (required): the memory ID returned by memory_save or memory_search"
-    ),
+MEMORY_GET_DESCRIPTION = (
+    "Fetch the complete record of a memory by its ID. Use this after "
+    "finding a memory via memory_search to read the full content "
+    "(search returns snippets only).\n\n"
+    "Parameters:\n"
+    '- scope (required): "project" or "global" — the memory\'s scope\n'
+    '- project_id (required): the project the memory belongs to ("_"\n'
+    "  for global)\n"
+    "- id (required): the memory ID returned by memory_save or memory_search"
+)
+
+MEMORY_GET_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "scope": {"type": "string", "enum": ["project", "global"]},
+        "project_id": {"type": "string"},
+        "id": {"type": "string"},
+    },
+    "required": ["scope", "project_id", "id"],
 }
 ```
+
+Registration on the 2026-07-28 protocol revision (mcp SDK 2.0.0) — the
+lowlevel `Server` takes the surface as constructor callbacks:
+
+```python
+async def _list_tools(ctx, params) -> ListToolsResult:
+    return ListToolsResult(
+        tools=[
+            Tool(name="memory_save", description=MEMORY_SAVE_DESCRIPTION,
+                 input_schema=MEMORY_SAVE_SCHEMA),
+            Tool(name="memory_get", description=MEMORY_GET_DESCRIPTION,
+                 input_schema=MEMORY_GET_SCHEMA),
+        ]
+    )
+
+mcp_server = Server("recall", on_list_tools=_list_tools, on_call_tool=_call_tool)
+```
+
+> **Implementation note (issue #91):** the spec showed each declaration as a
+> single dict carrying `name` + `description` with the JSON Schema omitted.
+> Shipped: description and schema are separate module constants (the name is
+> a `Tool` field, not part of the schema), the full JSON Schema is included
+> per the requirements tool-reference table, and the v1 SDK decorators
+> (`@mcp_server.list_tools()` / `@mcp_server.call_tool(validate_input=False)`)
+> are replaced by the 2.0.0 dispatcher callbacks — which do **no** input
+> pre-validation, so the router remains the single validator (AC1/AC3).
+
+<a id="LLD-e1-mcp-wiring"></a>
+
+#### MCP server composition (`src/recall/server.py`)
+
+The composition layer was not specified in the original LLD (review finding
+deferred to lld-sync); shipped code, 2026-07-28 protocol revision (mcp SDK
+2.0.0, ADR-0006 amendment 1):
+
+```python
+@dataclass
+class _McpRuntime:
+    """Mutable holder for the store-bound tool router (filled in the lifespan)."""
+    router: ToolRouter | None = None
+
+def _build_mcp_server(auth_config: AuthConfig, runtime: _McpRuntime) -> Server:
+    """on_list_tools + on_call_tool dispatcher handlers; auth gate in the handler."""
+    async def _call_tool(ctx, params: CallToolRequestParams) -> CallToolResult:
+        request = ctx.request
+        authorization = request.headers.get("authorization") if request is not None else None
+        try:
+            user_id = authenticate(auth_config, authorization)
+        except UnauthenticatedError as exc:
+            _log.warning("auth_reject", hint=exc.hint)
+            payload = {"error": exc.error, "hint": exc.hint}
+        else:
+            assert runtime.router is not None  # lifespan fills it before any request
+            payload = await runtime.router.handle_tool_call(
+                params.name, params.arguments or {}, user_id)
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))])
+    return Server("recall", on_list_tools=_list_tools, on_call_tool=_call_tool)
+
+def _build_lifespan(store, auth_config, mcp_runtime, mcp_server):
+    @asynccontextmanager
+    async def lifespan(app):
+        async with store as store_instance:
+            mcp_runtime.router = ToolRouter(MemoryService(StorageAdapter(store_instance)))
+            async with mcp_server.session_manager.run():
+                yield
+    return lifespan
+
+# create_app: health routes + Mount("/", mcp_server.streamable_http_app(
+#     json_response=True, stateless_http=True, host="0.0.0.0"))
+```
+
+Key properties of the shipped composition:
+
+- **Stateless is the protocol, not a mode.** The 2026-07-28 spec removed
+  sessions (SEP-2567) and the initialize handshake (SEP-2575) from Streamable
+  HTTP; `stateless_http=True` + `json_response=True` give one self-contained
+  POST per tool call — no MCP-Session-Id, no SSE stream.
+- **Auth at the transport, resolved from the request.** The SDK attaches the
+  Starlette Request to the message metadata, so the call-tool handler reads
+  `ctx.request.headers` directly — no middleware contextvar needed for auth
+  (the LLD's "Transport→Auth" arrow is satisfied by the SDK itself).
+- **The dispatcher task group runs in the app lifespan** (`session_manager.run()`)
+  — required even in stateless mode; the store-bound router is composed there
+  because the store *instance* only exists after the pool context is entered.
+- **Result shape:** handlers return `CallToolResult` with text-JSON content —
+  dict returns are not auto-converted to `structured_content` in the lowlevel
+  path; `result_type` defaults to `complete`.
+- **`host="0.0.0.0"`** mirrors `cli.DEFAULT_HOST` and keeps the SDK's
+  DNS-rebinding auto-protection off (it only engages for localhost binds);
+  a public deploy should pass its configured hostname explicitly (serve epic).
 
 <a id="LLD-e1-internal-decomposition"></a>
 
@@ -1059,7 +1194,8 @@ MEMORY_GET_SCHEMA = {
 | `embeddings/stub.py` | Deterministic test/dev provider | No I/O |
 | `storage_adapter.py` | Namespace construction, scope invariant, delegate to store | Thin wrapper over AsyncPostgresStore |
 | `memory_service.py` | Orchestrate save (build value → put) and get (direct namespaced read, ADR-0015) | Depends on storage adapter only |
-| `tool_router.py` | Dispatch, validation, error formatting, logging | Depends on service + auth |
+| `tool_router.py` | Dispatch, validation, error formatting, logging | Depends on service only — auth resolved at the transport (LLD-e1-mcp-wiring) |
+| `server.py` | Composition root: MCP server build (`on_list_tools`/`on_call_tool`), lifespan wiring (store → router → dispatcher), auth gate, health routes | Depends on all modules |
 | `models.py` | Pydantic models for the flat value schema | Pure data |
 | `errors.py` | Domain error types with {error, hint} shape | Pure data |
 
