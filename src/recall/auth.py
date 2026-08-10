@@ -20,13 +20,13 @@ def load_auth_config(auth_file_path: str) -> AuthConfig:
 
     File format: {"<token>": {"user_id": "<id>"}, ...}
 
+    Called at server startup with the ``RECALL_AUTH_FILE`` path (E1.6,
+    issue #91); the loader deliberately takes an explicit path per
+    LLD §E1.1.
+
     Raises:
         FileNotFoundError: if the file does not exist.
         ValueError: if the file is not valid JSON or has wrong shape.
-
-    TODO(#91): reading the path from RECALL_AUTH_FILE is wired at server
-    startup by E1.6 (Tool Router + MCP wiring); this loader deliberately
-    takes an explicit path per LLD §E1.1.
     """
     with open(auth_file_path) as f:
         data = json.load(f)
