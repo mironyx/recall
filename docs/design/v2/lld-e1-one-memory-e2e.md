@@ -17,6 +17,7 @@
 | Revised | 2026-08-09 — synced with E1.2 implementation (issue #87): `.fullmatch()` replaces `.match()` (trailing-newline gap); ValidationError(RecallError) shape deferred to E1.6 (#91); wave-table shared-files correction |
 | Revised | 2026-08-09 — E1.3 (#88) implemented: sync `embed()` interface (see implementation note), `validate_dim` added |
 | Revised | 2026-08-09 — E1.4 (#89) implemented: `validate_dim` call-site corrected to E1.6 (#91); `validate_dim` added to provider.py code block |
+| Revised | 2026-08-10 — E1.5 (#90) implemented: scope-explicit `get_by_id` per ADR-0015 (reverse index dropped, single-write `save`); code block synced to shipped code |
 
 ---
 
@@ -649,12 +650,12 @@ class StorageAdapter:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
 class MemoryService:
-    """Orchestrates memory operations: build value, delegate to storage, resolve get-by-id."""
+    """Orchestrates memory operations: build value, delegate to storage, direct get-by-id."""
 
     def __init__(
         self,
@@ -699,7 +700,7 @@ class MemoryService:
             EmbeddingError: embedding generation failed.
         """
         memory_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         value: dict[str, Any] = {
             "scope": scope,
@@ -732,6 +733,10 @@ class MemoryService:
         The (scope, project_id) namespace is provided by the caller
         (ADR-0015) — search results carry it, and id-only resolution is
         intentionally unsupported. get is a direct namespaced read.
+
+        Returns:
+            The full record dict — the flat value plus the memory id — which
+            satisfies the MemoryResponse shape (Story 2.4 AC1).
 
         Raises:
             NotFoundError: memory not found.
