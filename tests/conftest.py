@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import uuid
 from collections.abc import AsyncIterator, Generator, Iterator
 from typing import TYPE_CHECKING
 
@@ -71,36 +72,35 @@ def postgres_dsn(postgres_container: PostgresContainer) -> str:
 # Function-scoped clean-DB fixtures for schema tests
 # ---------------------------------------------------------------------------
 
-_TABLES_TO_DROP = (
-    "store_vectors",
-    "store",
-    "store_migrations",
-    "vector_migrations",
-)
-
-
-async def _drop_all(conn_string: str) -> None:
-    """Drop every table that ensure_schema could have created."""
-    async with (
-        await psycopg.AsyncConnection.connect(conn_string, autocommit=True) as conn,
-        conn.cursor() as cur,
-    ):
-        for table in _TABLES_TO_DROP:
-            await cur.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
-
 
 @pytest.fixture
 async def pg_conn(postgres_dsn: str) -> AsyncIterator[str]:
-    """Connection string pointing at a freshly-cleaned database.
+    """Connection string for a dedicated per-test database (schema tests only).
 
-    Drops all schema tables before and after each test so every test
-    starts from a blank slate without paying container-boot cost.
+    Schema tests drop and recreate all tables; on the shared container
+    database that churn would destroy the tables the session-scoped
+    ``store`` / ``_migrated_db_sess`` fixtures rely on. The suite only
+    stayed green because every ``store`` user happened to sort after
+    ``tests/test_schema.py`` — a per-test database makes the order
+    irrelevant (exposed by issue #90's ``test_memory_service.py``).
     """
-    await _drop_all(postgres_dsn)
+    db_name = f"recall_schema_{uuid.uuid4().hex}"
+    admin = await psycopg.AsyncConnection.connect(postgres_dsn, autocommit=True)
     try:
-        yield postgres_dsn
+        await admin.execute(f'CREATE DATABASE "{db_name}"')
     finally:
-        await _drop_all(postgres_dsn)
+        await admin.close()
+    dsn = f"{postgres_dsn.rsplit('/', 1)[0]}/{db_name}"
+    try:
+        yield dsn
+    finally:
+        # Every consumer uses context-managed connections, so the per-test
+        # database has no open connections by teardown time.
+        admin = await psycopg.AsyncConnection.connect(postgres_dsn, autocommit=True)
+        try:
+            await admin.execute(f'DROP DATABASE "{db_name}"')
+        finally:
+            await admin.close()
 
 
 @pytest.fixture

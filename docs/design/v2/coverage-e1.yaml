@@ -11,8 +11,10 @@ entries:
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-memory-service
     issue: 90
     files: []
-    status: Approved
+    status: Revised
     lld_revision: r1
+    # Revised: lld-sync (issue #90) — save re-specified as a single write per
+    # ADR-0015 (reverse index dropped). files: populated by feature-end post-merge.
     # Partial coverage: save path only. Update and delete are Phase 3 (E3.1, E3.2).
 
   - req: REQ-story-12-scope-invariant-enforcement
@@ -38,8 +40,10 @@ entries:
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-memory-service
     issue: 90
     files: []
-    status: Approved
+    status: Revised
     lld_revision: r1
+    # Revised: lld-sync (issue #90) — get re-specified as scope-explicit
+    # direct read per ADR-0015 (reverse index dropped). files: populated by feature-end post-merge.
 
   - req: REQ-story-41-streamable-http-transport
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-tool-router

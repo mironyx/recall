@@ -168,8 +168,8 @@ architecture is real, not sketched.
 
 ### E1.5 — Memory Service (save / get)
 - **HLD reference:** Memory Service.
-- **ADRs:** ADR-0001, ADR-0008.
-- **Rough tasks:** `save` orchestrating embed-then-put, `get_by_id`.
+- **ADRs:** ADR-0001, ADR-0008, ADR-0015 (scope-explicit id operations — no reverse index).
+- **Rough tasks:** `save` orchestrating embed-then-put, `get_by_id(scope, project_id, id)`.
 
 ### E1.6 — Tool Router + `memory_save` + `memory_get`
 - **HLD reference:** Tool Router; MCP Transport.
@@ -180,7 +180,7 @@ architecture is real, not sketched.
 
 **Phase 1 exit criterion.** Integration test: with a valid bearer token, an
 agent calls `memory_save` for a project memory, then `memory_get` with the
-returned id, and the round-trip succeeds. One `mcp_call` structured log
+returned id and its `(scope, project_id)`, and the round-trip succeeds. One `mcp_call` structured log
 line per call. The same test fails with `unauthenticated` if the token is
 omitted.
 

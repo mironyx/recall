@@ -146,7 +146,7 @@ The foundational data layer. An agent can persist memories with scope, kind, and
 ### Story 1.4: Update a memory
 
 **As an** agent,
-**I want to** update the content, tags, or metadata of an existing memory by ID,
+**I want to** update the content, tags, or metadata of an existing memory by ID within its `(scope, project_id)` namespace,
 **so that** I can refine knowledge as understanding evolves without creating duplicates.
 
 **Acceptance Criteria:**
@@ -166,7 +166,7 @@ The foundational data layer. An agent can persist memories with scope, kind, and
 ### Story 1.5: Delete a memory
 
 **As an** agent,
-**I want to** delete a memory by ID,
+**I want to** delete a memory by ID within its `(scope, project_id)` namespace,
 **so that** outdated or incorrect knowledge is removed and no longer surfaces in search results.
 
 **Acceptance Criteria:**
@@ -232,12 +232,12 @@ The primary value delivery. Agents find relevant memories through semantic searc
 ### Story 2.4: Retrieve a memory by ID
 
 **As an** agent,
-**I want to** fetch the full record of a specific memory by its ID,
+**I want to** fetch the full record of a specific memory by its ID within its `(scope, project_id)` namespace,
 **so that** I can read the complete content after finding it via search (which returns snippets only).
 
 **Acceptance Criteria:**
 
-- Given a valid memory ID, when I call the get operation, then the full memory record is returned including: ID, scope, project ID (if project-scoped), user ID, kind, title, content, tags, metadata, created_at, and updated_at.
+- Given a valid memory ID in a known scope, when I call the get operation with the memory's `scope` and `project_id`, then the full memory record is returned including: ID, scope, project ID (if project-scoped), user ID, kind, title, content, tags, metadata, created_at, and updated_at.
 - Given a memory ID that does not exist, when I call the get operation, then a structured error is returned indicating the memory was not found.
 
 ---
@@ -345,9 +345,9 @@ The following tools constitute the full MCP surface. This is the product interfa
 |---|------|-----------|---------|---------|
 | 1 | `memory_save` | `scope`, `project_id?`, `kind`, `title`, `content`, `tags?`, `metadata?` | `{id}` | Persist a new memory. `scope` is `"project"` or `"global"`. `project_id` required when `scope="project"`, forbidden when `scope="global"`. |
 | 2 | `memory_search` | `project_id`, `query`, `kind?`, `scope?`, `user_id?`, `limit?` | `[{id, scope, kind, title, snippet, score}]` | Semantic search. Searches the given project **and** global by default; pass `scope` to restrict. Instructions are retrieved via `kind="instruction"`. |
-| 3 | `memory_get` | `id` | Full memory record | Fetch the complete record for a memory found via search. |
-| 4 | `memory_update` | `id`, `content?`, `tags?`, `metadata?` | `{id}` | Update an existing memory's content, tags, or metadata. |
-| 5 | `memory_delete` | `id` | `{ok}` | Permanently remove a memory. |
+| 3 | `memory_get` | `scope`, `project_id`, `id` | Full memory record | Fetch the complete record for a memory found via search. The memory's `(scope, project_id)` namespace is required — id operations are namespace-explicit (ADR-0015). |
+| 4 | `memory_update` | `scope`, `project_id`, `id`, `content?`, `tags?`, `metadata?` | `{id}` | Update an existing memory's content, tags, or metadata. |
+| 5 | `memory_delete` | `scope`, `project_id`, `id` | `{ok}` | Permanently remove a memory. |
 
 **Note:** There is no dedicated `instructions_get` tool. Instructions are ordinary memories with `kind=instruction`, retrieved via `memory_search`. This keeps the tool count at 5, leaving room for a future tool within the ≤ 6 budget.
 
