@@ -2,13 +2,6 @@
 
 from __future__ import annotations
 
-# TODO(#91): Promote ValidationError to the LLD §E1.1 shape —
-# RecallError base with error='validation_error' + hint=detail attributes.
-# E1.1 (#86) has landed RecallError/UnauthenticatedError in this module;
-# the promotion is still deferred because the E1.6 error formatter
-# (issue #91, REQ-story-43) is the consumer of the structured shape and a
-# bare message is sufficient until then.
-
 
 class RecallError(Exception):
     """Base error for all Recall domain errors."""
@@ -27,8 +20,21 @@ class UnauthenticatedError(RecallError):
         )
 
 
-class ValidationError(Exception):
-    """Raised when input fails validation at the API boundary."""
+class ValidationError(RecallError):
+    """Raised when input fails validation at the API boundary.
+
+    Promoted to the RecallError hierarchy (LLD §E1.1 shape) by issue #91 —
+    the E1.6 error formatter catches RecallError and needs the structured
+    {error, hint} attributes. ``str()`` keeps returning the detail message
+    (not the error code) so existing callers that match on the message
+    keep working.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(error="validation_error", hint=detail)
+
+    def __str__(self) -> str:
+        return self.hint
 
 
 class NotFoundError(RecallError):

@@ -45,3 +45,34 @@ Recall v1 exposes its MCP surface **exclusively over the Streamable HTTP transpo
 - REQUIREMENTS.md — "Hard constraints" section; S2.4
 - docs/design/v1-design.md — Transport component; interaction I1
 - Design principle 4 ("one server, one transport, one entrypoint")
+
+## Amendment 1 (2026-08-10, PR #117): 2026-07-28 protocol revision, mcp SDK 2.0.0
+
+The transport is served by the **mcp SDK 2.0.0** (PyPI, 2026-07-28 — the same
+day the 2026-07-28 MCP spec revision was published). The original #117
+implementation used mcp 1.27.0 (2025-11-25 spec revision) in its `stateless`
+manager mode; the user directed a rewrite onto the latest published revision
+("in our doc we says that we should use latest"). What changed at the protocol
+level, all adopted here:
+
+- **Sessions removed from Streamable HTTP** (SEP-2567) — no MCP-Session-Id,
+  no session map, no SSE stream. Stateless is the protocol itself, not a
+  manager mode; every tool call completes in one round trip.
+- **Initialize handshake removed** (SEP-2575) — version negotiation and
+  capabilities moved to the first request's `_meta`; clients call tools
+  directly.
+- **`resultType` is required** on call-tool requests; responses default to
+  `complete`.
+- Wire types are pydantic models (snake_case fields: `structured_content`,
+  `input_schema`, ...); the v2 `Server` is built on a dispatcher engine with
+  `on_list_tools`/`on_call_tool` callbacks.
+
+Composition on this revision: `Server("recall", on_list_tools=..., on_call_tool=...)`
+→ `streamable_http_app(json_response=True, stateless_http=True, host="0.0.0.0")`
+→ mounted as a Starlette sub-app at `/`; the dispatcher task group runs in the
+app lifespan. `host="0.0.0.0"` mirrors `cli.DEFAULT_HOST` and keeps the SDK's
+DNS-rebinding auto-protection off (it only engages for localhost binds) — a
+public deploy should pass its configured hostname explicitly (serve epic).
+
+**Deferred (tracked, not in #117):** the SDK's `tasks` extension and DPoP are
+not yet implemented in 2.0.0; adopt when upstream lands them.

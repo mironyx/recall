@@ -53,8 +53,12 @@ entries:
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-tool-router
     issue: 91
     files: []
-    status: Approved
+    status: Revised
     lld_revision: r1
+    # Revised: lld-sync (issue #91) — transport corrected to the 2026-07-28
+    # protocol revision (mcp SDK 2.0.0, ADR-0006 amendment 1): stateless is
+    # protocol-native, dispatcher callbacks, no initialize. Stays Revised
+    # until the next feature (E2, search) confirms the shape.
 
   - req: REQ-story-43-structured-error-responses
     lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-errors
