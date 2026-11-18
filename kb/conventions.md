@@ -23,4 +23,4 @@
 | format-check-script | `./scripts/run-format-check.sh` |
 | markdown-lint-script | `./scripts/run-markdown-lint.sh` |
 | e2e-script | `./scripts/run-e2e.sh` |
-| gh-project-status-script | `./scripts/gh-project-status.sh` |
+| tracker-script | edf plugin `bin/tracker.py` (Jira project `REC`) |
