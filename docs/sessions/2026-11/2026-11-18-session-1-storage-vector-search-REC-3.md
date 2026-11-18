@@ -10,6 +10,7 @@
 | Step | Timestamp | Cost (cumulative) | Tokens (cumulative) | Note |
 |------|-----------|--------------------|----------------------|------|
 | 3c | 2026-11-18T18:06:50Z | $0.53 | 2,281 in / 5,800 out | pressure: standard — ~35 src lines, 1 file [models: claude-sonnet-5-5 $0.53, claude-haiku-5-5 $0.00] |
+| 10 | 2026-11-18T18:09:29Z | $1.24 | 4,657 in / 22,645 out | report done; review: 1 warn fixed; CI none on head (main red: ci fail(code) pre-existing) [models: claude-sonnet-5-5 $1.24, claude-haiku-5-5 $0.00] |
 
 ## Concerns & Deferred Items
 - `docs/design/v2/lld-e2-search.md` not on origin/main or any local branch; Step 3a External Surfaces table unavailable. Implemented against pinned langgraph-checkpoint-postgres 3.0.5 per the issue body.
