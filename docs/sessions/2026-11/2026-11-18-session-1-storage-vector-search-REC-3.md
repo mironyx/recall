@@ -16,3 +16,4 @@
 - `scripts/run-*.sh` absent in worktree; verified directly with `uv run pytest/ruff/mypy --strict` (231 passed, clean). `uv` was not on PATH; installed via pip --user.
 - Skipped `edf:diag` (CodeScene/Sonar) and `edf:feature-evaluator`: test-author covered all 12 BDD specs plus 3 extras; flagged for reviewer.
 - Interpretation: caller filter keys `scope`/`project_id` are rejected (outside `{kind, user_id}`), not silently overridden. `_scoping_filter` still adds its keys last.
+- Review: uv.lock revision 3→5 churn from newer uv — reverted (2-line fix, self-checked, no re-review).
