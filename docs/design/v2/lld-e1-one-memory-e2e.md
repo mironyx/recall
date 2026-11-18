@@ -537,7 +537,7 @@ def validate_dim(provider: EmbeddingsProvider, configured_dim: int) -> None:
 > `StorageAdapter` wraps an *injected* `AsyncPostgresStore` — it has no
 > store-creation site. Store creation lives at the composition root
 > (`server.py` wiring, E1.6, issue #91), so the wiring is deferred there.
-
+>
 > **Implementation note (issue #88):** `embed()` was specified as `async` but
 > was built **synchronous**. The only v1 consumer — LangGraph's
 > `AsyncPostgresStore` — invokes the embed callable synchronously inside a

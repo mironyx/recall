@@ -26,7 +26,7 @@
 - `src/recall/models.py` — `MemoryRecord` (10 flat fields, ADR-0001) and `MemoryResponse` (`id` first).
 - `tests/test_storage_adapter.py` — 25 tests (integration + unit): round trip, namespace construction via raw-store reads, invariant both directions, cross-project isolation, index forwarding incl. `index=False` (no vector row), model defaults/required/free-form kind.
 - `tests/conftest.py` — `store` fixture resolves embedder dims to match `ensure_schema` (`RECALL_EMBEDDING_DIMS`, default 1536); fixes "expected 1536 dimensions, not 384" for index-enabled `aput` (first tests in repo history to embed through the store).
-- PR: https://github.com/mironyx/recall/pull/114
+- PR: <https://github.com/mironyx/recall/pull/114>
 
 ## Decisions made
 
