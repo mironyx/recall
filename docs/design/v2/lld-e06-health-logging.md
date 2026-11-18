@@ -4,13 +4,13 @@
 
 | Field | Value |
 |-------|-------|
-| Parent epic | #72 — E0: Phase 0: Foundation |
-| Task issue | #78 — E0.6: Health endpoints and structured logging skeleton |
+| Parent epic | [#72](https://github.com/mironyx/recall/issues/72) — E0: Phase 0: Foundation |
+| Task issue | [#78](https://github.com/mironyx/recall/issues/78) — E0.6: Health endpoints and structured logging skeleton |
 | HLD components | Health Endpoints, Tool Router (logging), MCP Transport |
 | ADRs | ADR-0006, ADR-0011 |
 | Status | Revised |
 | Date | 2026-04-12 |
-| Revised | 2026-04-22 | Issue #78 (post-implementation sync) |
+| Revised | 2026-04-22 | Issue [#78](https://github.com/mironyx/recall/issues/78) (post-implementation sync) |
 | Version | 0.2 |
 
 ---
@@ -184,7 +184,7 @@ def create_app(conn_string: str) -> Starlette:
     Mounts:
     - /healthz — liveness probe
     - /readyz  — readiness probe (DB check)
-    - /mcp     — MCP Streamable HTTP endpoint _(deferred to Phase 1 — no stub shipped in #78)_
+    - /mcp     — MCP Streamable HTTP endpoint _(deferred to Phase 1 — no stub shipped in [#78](https://github.com/mironyx/recall/issues/78))_
 
     Also installs a :class:`RequestContextMiddleware` that binds a fresh
     ``request_id`` + OTEL ``trace_id``/``span_id`` into the structlog
@@ -206,12 +206,12 @@ the MCP endpoint on it. In Phase 0 the health endpoints are real;
 the MCP endpoint lands with real MCP routing in Phase 1 (no Phase 0 stub).
 `uvicorn` serves the app.
 
-> **Implementation note (issue #78):** The LLD originally listed `/mcp` as a
+> **Implementation note (issue [#78](https://github.com/mironyx/recall/issues/78)):** The LLD originally listed `/mcp` as a
 > Phase 0 stub route. It was dropped — wiring a no-op route with no consumer
 > is future-refactor churn. `/mcp` is deferred to Phase 1 where it ships
 > alongside the real MCP Tool Router.
 >
-> **Implementation note (issue #78):** The LLD's "Behavioural Flow —
+> **Implementation note (issue [#78](https://github.com/mironyx/recall/issues/78)):** The LLD's "Behavioural Flow —
 > Structured Logging on MCP Call" sequence specifies the transport-boundary
 > binding (generate `request_id`, extract `trace_id`/`span_id`, bind to
 > contextvar) but does not name a class. The behaviour ships as a pure-ASGI
@@ -253,7 +253,7 @@ async def readyz(request: Request) -> JSONResponse:
   structured `readyz_db_unreachable` / `readyz_query_failed` warning and returns 503 with a `reason` field.
 - No heavy queries — must respond within 1 second.
 
-> **Implementation note (issue #78):** The LLD originally prescribed a
+> **Implementation note (issue [#78](https://github.com/mironyx/recall/issues/78)):** The LLD originally prescribed a
 > shared connection pool on `app.state.pool` created at startup. The Phase 0
 > implementation instead opens a per-request asyncpg connection, because
 > Phase 0 has no other pool consumers and skipping the lifespan hook keeps
@@ -390,7 +390,7 @@ The `serve` subcommand (from E0.4) is updated to:
 
 ### Files
 
-Implemented as a single task (#78):
+Implemented as a single task ([#78](https://github.com/mironyx/recall/issues/78)):
 
 - `src/recall/server.py` — Starlette ASGI app with health + MCP stub routes
 - `src/recall/health.py` — `/healthz` and `/readyz` handlers

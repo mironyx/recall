@@ -6,19 +6,19 @@
 |-------|-------|
 | Epic | E1 — One memory, end-to-end |
 | Phase | 1 |
-| Epic issue | #85 |
-| Task issues | #86 (E1.1), #87 (E1.2), #88 (E1.3), #89 (E1.4), #90 (E1.5), #91 (E1.6) |
+| Epic issue | [#85](https://github.com/mironyx/recall/issues/85) |
+| Task issues | [#86](https://github.com/mironyx/recall/issues/86) (E1.1), [#87](https://github.com/mironyx/recall/issues/87) (E1.2), [#88](https://github.com/mironyx/recall/issues/88) (E1.3), [#89](https://github.com/mironyx/recall/issues/89) (E1.4), [#90](https://github.com/mironyx/recall/issues/90) (E1.5), [#91](https://github.com/mironyx/recall/issues/91) (E1.6) |
 | HLD components | Auth, Project Registry (deferred — ADR-0014), Embedder, Memory Service, Tool Router, MCP Transport |
 | ADRs | 0001 (flat schema), 0002 (namespace), 0004 (filters), 0006 (transport), 0007 (auth), 0008 (embeddings), 0011 (logging), 0014 (defer project registry, supersedes 0009) |
 | Status | Revised |
 | Date | 2026-04-12 |
 | Last revised | 2026-08-06 — synced with ADR-0014 (deferred project registry), migrated to docs/design/v2/, added LLD anchors for coverage manifest |
-| Revised | 2026-08-09 — synced with E1.1 implementation (issue #86): case-insensitive Bearer scheme, user_id string validation, RECALL_AUTH_FILE wiring deferred to E1.6 |
-| Revised | 2026-08-09 — synced with E1.2 implementation (issue #87): `.fullmatch()` replaces `.match()` (trailing-newline gap); ValidationError(RecallError) shape deferred to E1.6 (#91); wave-table shared-files correction |
-| Revised | 2026-08-09 — E1.3 (#88) implemented: sync `embed()` interface (see implementation note), `validate_dim` added |
-| Revised | 2026-08-09 — E1.4 (#89) implemented: `validate_dim` call-site corrected to E1.6 (#91); `validate_dim` added to provider.py code block |
-| Revised | 2026-08-10 — E1.5 (#90) implemented: scope-explicit `get_by_id` per ADR-0015 (reverse index dropped, single-write `save`); code block synced to shipped code |
-| Revised | 2026-08-10 — E1.6 (#91) implemented: ToolRouter ships without `auth_config` (auth resolved at the transport from `ServerRequestContext.request.headers`); scope invariant enforced in `_resolve_save_namespace` with GLOBAL_SENTINEL fill; `mcp_call` via extracted `_log_call`; transport corrected to the 2026-07-28 protocol revision (mcp SDK 2.0.0 — dispatcher `Server(on_list_tools/on_call_tool)`, `streamable_http_app` mounted at `/`, no initialize handshake); new LLD-e1-mcp-wiring section; code blocks synced to shipped code |
+| Revised | 2026-08-09 — synced with E1.1 implementation (issue [#86](https://github.com/mironyx/recall/issues/86)): case-insensitive Bearer scheme, user_id string validation, RECALL_AUTH_FILE wiring deferred to E1.6 |
+| Revised | 2026-08-09 — synced with E1.2 implementation (issue [#87](https://github.com/mironyx/recall/issues/87)): `.fullmatch()` replaces `.match()` (trailing-newline gap); ValidationError(RecallError) shape deferred to E1.6 ([#91](https://github.com/mironyx/recall/issues/91)); wave-table shared-files correction |
+| Revised | 2026-08-09 — E1.3 ([#88](https://github.com/mironyx/recall/issues/88)) implemented: sync `embed()` interface (see implementation note), `validate_dim` added |
+| Revised | 2026-08-09 — E1.4 ([#89](https://github.com/mironyx/recall/issues/89)) implemented: `validate_dim` call-site corrected to E1.6 ([#91](https://github.com/mironyx/recall/issues/91)); `validate_dim` added to provider.py code block |
+| Revised | 2026-08-10 — E1.5 ([#90](https://github.com/mironyx/recall/issues/90)) implemented: scope-explicit `get_by_id` per ADR-0015 (reverse index dropped, single-write `save`); code block synced to shipped code |
+| Revised | 2026-08-10 — E1.6 ([#91](https://github.com/mironyx/recall/issues/91)) implemented: ToolRouter ships without `auth_config` (auth resolved at the transport from `ServerRequestContext.request.headers`); scope invariant enforced in `_resolve_save_namespace` with GLOBAL_SENTINEL fill; `mcp_call` via extracted `_log_call`; transport corrected to the 2026-07-28 protocol revision (mcp SDK 2.0.0 — dispatcher `Server(on_list_tools/on_call_tool)`, `streamable_http_app` mounted at `/`, no initialize handshake); new LLD-e1-mcp-wiring section; code blocks synced to shipped code |
 
 ---
 
@@ -399,19 +399,19 @@ def authenticate(auth_config: AuthConfig, authorization_header: str | None) -> s
 - `authenticate()` is a pure function — no I/O, no DB. Easy to unit test.
 - `UnauthenticatedError` is defined in a shared `errors.py` module.
 
-> **Implementation note (issue #86):** The `Bearer` auth-scheme token is
+> **Implementation note (issue [#86](https://github.com/mironyx/recall/issues/86)):** The `Bearer` auth-scheme token is
 > matched case-insensitively (`parts[0].lower() != "bearer"`), per RFC 7235
 > §2.1 — auth-scheme tokens are case-insensitive. Regression-tested
 > (`test_bearer_scheme_is_case_insensitive`).
 >
-> **Implementation note (issue #86):** `load_auth_config` additionally
+> **Implementation note (issue [#86](https://github.com/mironyx/recall/issues/86)):** `load_auth_config` additionally
 > validates that each entry's `user_id` is a string (`ValueError` otherwise) —
 > a non-string `user_id` would silently corrupt the documented
 > `authenticate() -> str` contract. Loader error messages never include token
 > values (live credentials per ADR-0007).
 >
-> **Implementation note (issue #86):** Reading the file path from
-> `RECALL_AUTH_FILE` is wired at server startup by E1.6 (issue #91); the
+> **Implementation note (issue [#86](https://github.com/mironyx/recall/issues/86)):** Reading the file path from
+> `RECALL_AUTH_FILE` is wired at server startup by E1.6 (issue [#91](https://github.com/mironyx/recall/issues/91)); the
 > loader itself takes an explicit path (see `TODO(#91)` in `load_auth_config`).
 
 <a id="LLD-e1-project-id-validation"></a>
@@ -455,7 +455,7 @@ def validate_project_id_format(project_id: str) -> None:
         )
 ```
 
-> **Implementation note (issue #87):** The spec used `re.match(...)` with a
+> **Implementation note (issue [#87](https://github.com/mironyx/recall/issues/87)):** The spec used `re.match(...)` with a
 > `$` anchor. Python's `$` matches just before a trailing `\n`, so `.match()`
 > silently accepted `'global\n'` and a 129-char ID ending in newline —
 > bypassing the reserved-name guard and the `{1,128}` bound. The
@@ -530,15 +530,15 @@ def validate_dim(provider: EmbeddingsProvider, configured_dim: int) -> None:
   It moves from a plain class to inheriting `EmbeddingsProvider`.
 - `validate_dim(provider, configured_dim)` is the fail-fast check for
   EMBEDDINGS_DIM vs the provider's dim; the startup call site lands at the
-  composition root (E1.6, issue #91).
+  composition root (E1.6, issue [#91](https://github.com/mironyx/recall/issues/91)).
 
-> **Implementation note (issue #89):** the LLD originally placed
+> **Implementation note (issue [#89](https://github.com/mironyx/recall/issues/89)):** the LLD originally placed
 > `validate_dim`'s call site in E1.4 ("store creation"), but E1.4's
 > `StorageAdapter` wraps an *injected* `AsyncPostgresStore` — it has no
 > store-creation site. Store creation lives at the composition root
-> (`server.py` wiring, E1.6, issue #91), so the wiring is deferred there.
+> (`server.py` wiring, E1.6, issue [#91](https://github.com/mironyx/recall/issues/91)), so the wiring is deferred there.
 >
-> **Implementation note (issue #88):** `embed()` was specified as `async` but
+> **Implementation note (issue [#88](https://github.com/mironyx/recall/issues/88)):** `embed()` was specified as `async` but
 > was built **synchronous**. The only v1 consumer — LangGraph's
 > `AsyncPostgresStore` — invokes the embed callable synchronously inside a
 > thread-pool executor (`aput → run_in_executor → batch → embed_documents`);
@@ -751,7 +751,7 @@ class MemoryService:
 **Design note — memory_get scope resolution (ADR-0015):**
 
 The MCP tool `memory_get` takes `scope`, `project_id`, and `id` explicitly —
-**no reverse index.** The original id-only contract (issue #90 AC2/AC3,
+**no reverse index.** The original id-only contract (issue [#90](https://github.com/mironyx/recall/issues/90) AC2/AC3,
 `("_index", "_")` index) was dropped per ADR-0015: there is no user-level
 use case for id-only operations — search results already carry the scope —
 and the index would turn save() into two non-atomic writes while widening
@@ -833,7 +833,7 @@ class UnauthenticatedError(RecallError):
         )
 
 
-class ValidationError(RecallError):  # _(deferred → issue #91)_ — currently a bare Exception subclass
+class ValidationError(RecallError):  # _(deferred → issue [#91](https://github.com/mironyx/recall/issues/91))_ — currently a bare Exception subclass
     def __init__(self, detail: str) -> None:
         super().__init__(
             error="validation_error",
@@ -1010,7 +1010,7 @@ class ToolRouter:
 
 **Key change from original LLD:** `ToolRouter.__init__` no longer takes `project_registry`. Per ADR-0014, project validation is a pure format check (`validate_project_id_format()`), not a DB-backed registry lookup.
 
-> **Implementation note (issue #91):** the spec code block diverged from the
+> **Implementation note (issue [#91](https://github.com/mironyx/recall/issues/91)):** the spec code block diverged from the
 > shipped code in four ways. (1) `ToolRouter.__init__` takes **only**
 > `memory_service` — the spec's `auth_config` was dropped: authentication is
 > resolved at the transport boundary, where the call-tool handler reads the
@@ -1109,7 +1109,7 @@ async def _list_tools(ctx, params) -> ListToolsResult:
 mcp_server = Server("recall", on_list_tools=_list_tools, on_call_tool=_call_tool)
 ```
 
-> **Implementation note (issue #91):** the spec showed each declaration as a
+> **Implementation note (issue [#91](https://github.com/mironyx/recall/issues/91)):** the spec showed each declaration as a
 > single dict carrying `name` + `description` with the JSON Schema omitted.
 > Shipped: description and schema are separate module constants (the name is
 > a `Tool` field, not part of the schema), the full JSON Schema is included
@@ -1220,9 +1220,9 @@ Key properties of the shipped composition:
 |------|-------|------------|-------|
 | 1 | E1.1, E1.2, E1.3 | Phase 0 | Parallelisable; E1.1 and E1.2 share `src/recall/errors.py` — second landing PR must rebase and merge both error classes |
 
-> **Implementation note (issue #87):** The original "no shared files" claim
-> was wrong — E1.1 (issue #86) writes `RecallError`/`UnauthenticatedError`
-> and E1.2 (issue #87) writes `ValidationError` in the same module. Still
+> **Implementation note (issue [#87](https://github.com/mironyx/recall/issues/87)):** The original "no shared files" claim
+> was wrong — E1.1 (issue [#86](https://github.com/mironyx/recall/issues/86)) writes `RecallError`/`UnauthenticatedError`
+> and E1.2 (issue [#87](https://github.com/mironyx/recall/issues/87)) writes `ValidationError` in the same module. Still
 > parallelisable, but the second PR to land rebases `errors.py` and keeps
 > both sides' classes.
 | 2 | E1.4 | E1.3 | Storage adapter needs embedder interface |

@@ -35,5 +35,5 @@ instead of re-implementing a stub embedder.
 The `EmbeddingsProvider` ABC and `validate_dim(provider, configured_dim)`
 live in `src/recall/embeddings/provider.py` (ADR-0008) — the embedder contract
 every provider implements (stub now, HTTP in E4). `validate_dim` is the
-fail-fast EMBEDDINGS_DIM check; it is wired at store creation (E1.6, issue #91).
+fail-fast EMBEDDINGS_DIM check; it is wired at store creation (E1.6, issue [#91](https://github.com/mironyx/recall/issues/91)).
 Reuse both when adding providers or index-backed wiring.

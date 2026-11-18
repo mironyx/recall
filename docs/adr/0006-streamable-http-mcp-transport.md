@@ -46,10 +46,10 @@ Recall v1 exposes its MCP surface **exclusively over the Streamable HTTP transpo
 - docs/design/v1-design.md — Transport component; interaction I1
 - Design principle 4 ("one server, one transport, one entrypoint")
 
-## Amendment 1 (2026-08-10, PR #117): 2026-07-28 protocol revision, mcp SDK 2.0.0
+## Amendment 1 (2026-08-10, PR [#117](https://github.com/mironyx/recall/issues/117)): 2026-07-28 protocol revision, mcp SDK 2.0.0
 
 The transport is served by the **mcp SDK 2.0.0** (PyPI, 2026-07-28 — the same
-day the 2026-07-28 MCP spec revision was published). The original #117
+day the 2026-07-28 MCP spec revision was published). The original [#117](https://github.com/mironyx/recall/issues/117)
 implementation used mcp 1.27.0 (2025-11-25 spec revision) in its `stateless`
 manager mode; the user directed a rewrite onto the latest published revision
 ("in our doc we says that we should use latest"). What changed at the protocol
@@ -74,5 +74,5 @@ app lifespan. `host="0.0.0.0"` mirrors `cli.DEFAULT_HOST` and keeps the SDK's
 DNS-rebinding auto-protection off (it only engages for localhost binds) — a
 public deploy should pass its configured hostname explicitly (serve epic).
 
-**Deferred (tracked, not in #117):** the SDK's `tasks` extension and DPoP are
+**Deferred (tracked, not in [#117](https://github.com/mironyx/recall/issues/117)):** the SDK's `tasks` extension and DPoP are
 not yet implemented in 2.0.0; adopt when upstream lands them.

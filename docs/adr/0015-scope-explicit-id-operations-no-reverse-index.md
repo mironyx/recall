@@ -61,11 +61,11 @@ During implementation review, the reverse index was challenged:
   Id-only recall with unknown scope is intentionally unsupported — search
   is the discovery path, and the requirements define no flow that needs it.
 - **Retroactive interface change.** The requirements tool table and issue
-  #90 AC2/AC3 were written against the id-only contract; they are updated
+  [#90](https://github.com/mironyx/recall/issues/90) AC2/AC3 were written against the id-only contract; they are updated
   in sync with this ADR. The LLD §E1.5 design note is superseded.
 
 ## References
 
 - Supersedes: `lld-e1-one-memory-e2e.md` §E1.5 design note "memory_get ID
-  resolution" and issue #90 AC2/AC3 (id-only contract).
-- Implementation: PR #115 (E1.5 Memory Service).
+  resolution" and issue [#90](https://github.com/mironyx/recall/issues/90) AC2/AC3 (id-only contract).
+- Implementation: PR [#115](https://github.com/mironyx/recall/issues/115) (E1.5 Memory Service).
