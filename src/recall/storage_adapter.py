@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from langgraph.store.base import Item
+from langgraph.store.base import Item, SearchItem
 from langgraph.store.postgres import AsyncPostgresStore
 
 from recall.errors import ValidationError
 
 GLOBAL_SENTINEL = "_"
+
+# ADR-0004: the only caller-supplied filter keys search accepts.
+_ALLOWED_FILTER_KEYS = frozenset({"kind", "user_id"})
 
 
 class StorageAdapter:
@@ -57,6 +60,54 @@ class StorageAdapter:
         """
         namespace = self._build_namespace(scope, project_id)
         return await self._store.aget(namespace, key)
+
+    async def search(
+        self,
+        scope: str,
+        project_id: str,
+        query: str,
+        filter: dict[str, Any] | None = None,
+        limit: int = 10,
+    ) -> list[SearchItem]:
+        """Semantic search within exactly one (scope, project_id) namespace.
+
+        Scores are the store's cosine similarity, returned untouched.
+
+        Raises:
+            ValidationError: on a scope/project_id invariant violation or a
+                filter key outside {kind, user_id} (ADR-0004).
+        """
+        namespace = self._build_namespace(scope, project_id)
+        self._validate_filter_keys(filter)
+        return await self._store.asearch(
+            namespace,
+            query=query,
+            filter=self._scoping_filter(scope, project_id, filter),
+            limit=limit,
+        )
+
+    @staticmethod
+    def _validate_filter_keys(filter: dict[str, Any] | None) -> None:
+        """Reject caller filter keys outside {kind, user_id} (ADR-0004)."""
+        for key in filter or {}:
+            if key not in _ALLOWED_FILTER_KEYS:
+                raise ValidationError(
+                    f"Unsupported filter key: {key!r}; allowed: {sorted(_ALLOWED_FILTER_KEYS)}"
+                )
+
+    @staticmethod
+    def _scoping_filter(
+        scope: str,
+        project_id: str,
+        filter: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Merge exact ``scope``/``project_id`` clauses over the caller filter.
+
+        asearch scopes by namespace *prefix* (SQL LIKE), so 'app' would also match
+        'app-v2'. These top-level $eq clauses make the scoping exact. Added last
+        so the caller cannot override them. Do not remove.
+        """
+        return {**(filter or {}), "scope": scope, "project_id": project_id}
 
     @staticmethod
     def _build_namespace(scope: str, project_id: str) -> tuple[str, str]:

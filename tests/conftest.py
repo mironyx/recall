@@ -186,6 +186,40 @@ async def store(pg_conn_string: str, _store_session: None) -> AsyncIterator[obje
         yield s
 
 
+class _CountingStore:
+    """Decorator over a real AsyncPostgresStore that counts ``asearch`` calls.
+
+    Not a subclass and not a mock: every call is forwarded to the real store
+    (ADR-0012); the only addition is the ``asearch_calls`` counter.
+    """
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+        self.asearch_calls = 0
+
+    async def asearch(self, *args: object, **kwargs: object) -> object:
+        self.asearch_calls += 1
+        return await self._inner.asearch(*args, **kwargs)  # type: ignore[attr-defined]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+
+@pytest.fixture
+def counting_adapter(store: object) -> object:
+    """A ``StorageAdapter`` over a call-counting decorator of the real store.
+
+    The returned adapter exposes ``counting_store`` (with ``asearch_calls``)
+    so tests can assert how many ``asearch`` calls reached the real store.
+    """
+    from recall.storage_adapter import StorageAdapter
+
+    counting_store = _CountingStore(store)
+    adapter = StorageAdapter(counting_store)  # type: ignore[arg-type]
+    adapter.counting_store = counting_store  # type: ignore[attr-defined]
+    return adapter
+
+
 # ---------------------------------------------------------------------------
 # Logging reset — configure_logging must be reversible across tests
 # ---------------------------------------------------------------------------

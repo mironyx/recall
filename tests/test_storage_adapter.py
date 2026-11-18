@@ -328,3 +328,216 @@ class TestMemoryResponseModel:
         ValidationError is raised (LLD: ``id: str`` has no default)."""
         with pytest.raises(PydanticValidationError):
             MemoryResponse(**_memory_value())
+
+
+# ---------------------------------------------------------------------------
+# REC-3 — StorageAdapter.search (E2.1)
+# ---------------------------------------------------------------------------
+# Planting recipe: StubEmbeddingsProvider is a hash embedder with no semantic
+# structure. Cosine is ~1.0 only for byte-identical text, so every ranking
+# assertion sets the query byte-identical to one memory's ``content``.
+
+
+async def _plant(
+    adapter: StorageAdapter,
+    scope: str,
+    project_id: str,
+    content: str,
+    **overrides: Any,
+) -> str:
+    """Store one memory indexed on ``content`` (as E1's save does); return its key."""
+    key = str(uuid.uuid4())
+    value = _memory_value(scope=scope, project_id=project_id, content=content, **overrides)
+    await adapter.put(scope, project_id, key, value, index=["content"])
+    return key
+
+
+@pytest.mark.integration
+class TestStorageAdapterSearch:
+    """BDD spec (REC-3) — namespace-exact semantic search."""
+
+    async def test_exact_content_match_scores_highest(self, store: AsyncPostgresStore) -> None:
+        """Given a query byte-identical to one memory's content, it ranks first at ~1.0."""
+        adapter = StorageAdapter(store)
+        await _plant(adapter, "project", "app", "alpha content")
+        target = await _plant(adapter, "project", "app", "beta content")
+        await _plant(adapter, "project", "app", "gamma content")
+
+        results = await adapter.search("project", "app", "beta content")
+
+        assert results[0].key == target
+        assert results[0].score == pytest.approx(1.0, abs=1e-3)
+        assert all(r.score is not None and r.score < 0.5 for r in results[1:])
+
+    async def test_scores_are_passed_through_unmodified(self, store: AsyncPostgresStore) -> None:
+        """Given a planted memory, the adapter's score equals the raw store score."""
+        adapter = StorageAdapter(store)
+        key = await _plant(adapter, "project", "app", "score passthrough")
+
+        results = await adapter.search("project", "app", "score passthrough")
+        raw = await store.asearch(("project", "app"), query="score passthrough", limit=10)
+
+        raw_score = next(r.score for r in raw if r.key == key)
+        adapter_score = next(r.score for r in results if r.key == key)
+        assert adapter_score == raw_score
+
+    async def test_prefix_overlapping_project_is_isolated(self, store: AsyncPostgresStore) -> None:
+        """Given memories in 'app' and 'app-v2', a search in 'app' returns only 'app'."""
+        adapter = StorageAdapter(store)
+        in_app = await _plant(adapter, "project", "app", "shared text")
+        in_v2 = await _plant(adapter, "project", "app-v2", "shared text")
+        in_foo = await _plant(adapter, "project", "appfoo", "shared text")
+
+        results = await adapter.search("project", "app", "shared text")
+
+        keys = {r.key for r in results}
+        assert keys == {in_app}
+        assert in_v2 not in keys and in_foo not in keys
+        assert all(r.namespace == ("project", "app") for r in results)
+
+    async def test_global_namespace_search(self, store: AsyncPostgresStore) -> None:
+        """Given scope=global, only the ('global', '_') namespace is searched."""
+        adapter = StorageAdapter(store)
+        glob = await _plant(adapter, "global", GLOBAL_SENTINEL, "same text")
+        await _plant(adapter, "project", "app", "same text")
+
+        results = await adapter.search("global", GLOBAL_SENTINEL, "same text")
+
+        assert [r.key for r in results] == [glob]
+        assert results[0].namespace == ("global", GLOBAL_SENTINEL)
+
+    async def test_empty_result_is_not_an_error(self, store: AsyncPostgresStore) -> None:
+        """Given no matching memories, an empty list is returned."""
+        adapter = StorageAdapter(store)
+
+        assert await adapter.search("project", "nothing-here", "anything") == []
+
+    async def test_kind_filter_applied(self, store: AsyncPostgresStore) -> None:
+        """Given filter={'kind': 'decision'}, only decision memories return."""
+        adapter = StorageAdapter(store)
+        decision = await _plant(adapter, "project", "app", "one", kind="decision")
+        await _plant(adapter, "project", "app", "two", kind="note")
+
+        results = await adapter.search("project", "app", "one", filter={"kind": "decision"})
+
+        assert [r.key for r in results] == [decision]
+
+    async def test_user_id_filter_applied(self, store: AsyncPostgresStore) -> None:
+        """Given filter={'user_id': 'alice'}, only alice's memories return."""
+        adapter = StorageAdapter(store)
+        alice = await _plant(adapter, "project", "app", "one", user_id="alice")
+        await _plant(adapter, "project", "app", "two", user_id="bob")
+
+        results = await adapter.search("project", "app", "one", filter={"user_id": "alice"})
+
+        assert [r.key for r in results] == [alice]
+
+    async def test_kind_and_user_id_filters_are_conjunctive(
+        self, store: AsyncPostgresStore
+    ) -> None:
+        """Given both keys in one filter dict, they AND together (ADR-0004)."""
+        adapter = StorageAdapter(store)
+        both = await _plant(adapter, "project", "app", "t1", kind="decision", user_id="alice")
+        await _plant(adapter, "project", "app", "t2", kind="decision", user_id="bob")
+        await _plant(adapter, "project", "app", "t3", kind="note", user_id="alice")
+
+        results = await adapter.search(
+            "project", "app", "t1", filter={"kind": "decision", "user_id": "alice"}
+        )
+
+        assert [r.key for r in results] == [both]
+
+    async def test_unsupported_filter_key_rejected(self, store: AsyncPostgresStore) -> None:
+        """Given filter={'tags': [...]}, ValidationError names the key (ADR-0004)."""
+        adapter = StorageAdapter(store)
+
+        with pytest.raises(ValidationError, match="tags"):
+            await adapter.search("project", "app", "q", filter={"tags": ["architecture"]})
+
+    async def test_caller_cannot_override_scoping_via_filter(
+        self, store: AsyncPostgresStore
+    ) -> None:
+        """Given a filter naming project_id/scope, it is rejected (not in {kind, user_id})
+        so a caller cannot widen the namespace."""
+        adapter = StorageAdapter(store)
+        await _plant(adapter, "project", "other", "leak me")
+
+        with pytest.raises(ValidationError, match="project_id"):
+            await adapter.search("project", "app", "leak me", filter={"project_id": "other"})
+        with pytest.raises(ValidationError, match="scope"):
+            await adapter.search("project", "app", "leak me", filter={"scope": "global"})
+
+    async def test_scope_invariant_enforced(self, store: AsyncPostgresStore) -> None:
+        """Given scope=global with a real project_id, ValidationError propagates."""
+        adapter = StorageAdapter(store)
+
+        with pytest.raises(ValidationError):
+            await adapter.search("global", "app", "q")
+        with pytest.raises(ValidationError):
+            await adapter.search("project", GLOBAL_SENTINEL, "q")
+
+    async def test_limit_forwarded(self, store: AsyncPostgresStore) -> None:
+        """Given limit=2 and three matches, exactly two results return."""
+        adapter = StorageAdapter(store)
+        for i in range(3):
+            await _plant(adapter, "project", "app", f"memory {i}")
+
+        results = await adapter.search("project", "app", "memory 0", limit=2)
+
+        assert len(results) == 2
+
+    async def test_single_round_trip(self, counting_adapter: Any) -> None:
+        """Given one search call, exactly one asearch reaches the store."""
+        await _plant(counting_adapter, "project", "app", "round trip")
+
+        results = await counting_adapter.search("project", "app", "round trip")
+
+        assert len(results) == 1
+        assert counting_adapter.counting_store.asearch_calls == 1
+
+
+class TestScopingFilter:
+    """Pure unit tests — no DB."""
+
+    def test_injects_scope_and_project_id(self) -> None:
+        """Given any inputs, the returned filter carries both keys."""
+        result = StorageAdapter._scoping_filter("project", "app", None)
+
+        assert result["scope"] == "project"
+        assert result["project_id"] == "app"
+
+    def test_preserves_caller_filter_keys(self) -> None:
+        """Given filter={'kind': 'x'}, the result carries kind, scope and project_id."""
+        result = StorageAdapter._scoping_filter("project", "app", {"kind": "x"})
+
+        assert result["kind"] == "x"
+        assert result["scope"] == "project"
+        assert result["project_id"] == "app"
+
+    def test_injected_keys_win_over_caller_keys(self) -> None:
+        """Given a caller filter containing scope/project_id, injected values win."""
+        result = StorageAdapter._scoping_filter(
+            "project", "app", {"scope": "global", "project_id": "other"}
+        )
+
+        assert result["scope"] == "project"
+        assert result["project_id"] == "app"
+
+    def test_does_not_mutate_caller_filter(self) -> None:
+        """Given a caller filter dict, it is left unchanged."""
+        caller = {"kind": "x"}
+
+        StorageAdapter._scoping_filter("project", "app", caller)
+
+        assert caller == {"kind": "x"}
+
+    def test_validate_filter_keys_accepts_none_and_allowed(self) -> None:
+        """None, {} and {kind, user_id} pass the ADR-0004 key guard."""
+        StorageAdapter._validate_filter_keys(None)
+        StorageAdapter._validate_filter_keys({})
+        StorageAdapter._validate_filter_keys({"kind": "a", "user_id": "b"})
+
+    def test_validate_filter_keys_rejects_unknown_key_by_name(self) -> None:
+        """Given a key outside {kind, user_id}, ValidationError names it."""
+        with pytest.raises(ValidationError, match="tags"):
+            StorageAdapter._validate_filter_keys({"kind": "a", "tags": ["x"]})

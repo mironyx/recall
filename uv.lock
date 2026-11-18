@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -1568,8 +1568,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.29" },
-    { name = "langgraph", specifier = ">=0.2" },
-    { name = "langgraph-checkpoint-postgres" },
+    { name = "langgraph", specifier = ">=1.1,<2" },
+    { name = "langgraph-checkpoint-postgres", specifier = ">=3.0.5,<4" },
     { name = "mcp", specifier = ">=2.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
     { name = "openai", specifier = ">=1.40" },
