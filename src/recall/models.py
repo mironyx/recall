@@ -40,3 +40,15 @@ class MemoryResponse(BaseModel):
     metadata: dict[str, Any]
     created_at: str
     updated_at: str
+
+
+class SearchResult(BaseModel):
+    """One search hit: a snippet, not the full content (Story 2.5)."""
+
+    id: str
+    scope: str
+    project_id: str
+    kind: str
+    title: str
+    snippet: str
+    score: float
