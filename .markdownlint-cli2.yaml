@@ -19,6 +19,8 @@ config:
   heading-increment: false
   no-trailing-spaces: false
   single-trailing-newline: false
+  no-inline-html:
+    allowed_elements: [a]
   no-duplicate-heading:
     siblings_only: true
   first-line-heading: false

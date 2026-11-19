@@ -108,6 +108,6 @@ Pipeline: `requirements → /kickoff → /architect → /feature → /feature-en
 
 ## Task tracking
 
-Jira project `REC` (https://mironyx.atlassian.net). Labels: `epic`, `phase-0`–`phase-5`, `area:*`, `kind:task`. Manage via the edf plugin's `tracker.py` (used by the edf skills; credentials in `.env`: `JIRA_HOST`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_SPACE`). Issues before E2 (GitHub #1–#115) remain in GitHub as history.
+Jira project `REC` (<https://mironyx.atlassian.net>). Labels: `epic`, `phase-0`–`phase-5`, `area:*`, `kind:task`. Manage via the edf plugin's `tracker.py` (used by the edf skills; credentials in `.env`: `JIRA_HOST`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_SPACE`). Issues before E2 (GitHub #1–#115) remain in GitHub as history.
 
 **Issue verification (blocking):** after creating or modifying issues, run `tracker.py list` (or `view <ref>`) to confirm every issue exists with the expected parent and labels. Never assume — verify it.

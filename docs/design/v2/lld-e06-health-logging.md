@@ -210,7 +210,7 @@ the MCP endpoint lands with real MCP routing in Phase 1 (no Phase 0 stub).
 > Phase 0 stub route. It was dropped — wiring a no-op route with no consumer
 > is future-refactor churn. `/mcp` is deferred to Phase 1 where it ships
 > alongside the real MCP Tool Router.
-
+>
 > **Implementation note (issue #78):** The LLD's "Behavioural Flow —
 > Structured Logging on MCP Call" sequence specifies the transport-boundary
 > binding (generate `request_id`, extract `trace_id`/`span_id`, bind to

@@ -27,7 +27,7 @@
 
 Implemented E1.2 (issue #87): `validate_project_id_format()` in `src/recall/validation.py` — pure function, no I/O/DB/cache. Rejects reserved names `global`/`_` case-insensitively and enforces `^[a-zA-Z0-9_-]{1,128}$` via `PROJECT_ID_PATTERN`. `ValidationError` added to shared `src/recall/errors.py` (bare `Exception` subclass, see Decisions). 12 unit tests in `tests/test_validation.py`, all green.
 
-PR: https://github.com/mironyx/recall/pull/111 — 5 commits (feat + MD058 doc fix + trailing-newline fix + review-outcome doc + lld-sync/session-log finalisation).
+PR: <https://github.com/mironyx/recall/pull/111> — 5 commits (feat + MD058 doc fix + trailing-newline fix + review-outcome doc + lld-sync/session-log finalisation).
 
 ## Decisions made
 
