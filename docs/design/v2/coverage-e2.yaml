@@ -1,0 +1,56 @@
+# Coverage manifest — Epic E2 (Search)
+#
+# Maps each requirements story to its LLD section, implementing task issue,
+# and files. Status transitions:
+#   Draft → Approved (lld written) → Implemented (PR merged) → Revised (lld corrected)
+
+epic: e2
+entries:
+  - req: REQ-story-21-semantic-search
+    lld: v2/lld-e2-search.md#LLD-e2-service-search
+    issue: REC-4
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Primary section: service search (REC-4). Also covered by LLD-e2-storage-search (REC-3,
+    # implemented, PR #122) and LLD-e2-search-tool (REC-6).
+
+  - req: REQ-story-22-merged-project-and-global-results
+    lld: v2/lld-e2-search.md#LLD-e2-merge
+    issue: REC-5
+    files: []
+    status: Approved
+    lld_revision: r1
+
+  - req: REQ-story-23-search-filtering
+    lld: v2/lld-e2-search.md#LLD-e2-service-search
+    issue: REC-4
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Storage-side ADR-0004 key guard implemented in REC-3 (PR #122).
+
+  - req: REQ-story-24-retrieve-a-memory-by-id
+    lld: v2/lld-e1-one-memory-e2e.md#LLD-e1-memory-service
+    issue: 90
+    files:
+      - src/recall/memory_service.py
+    status: Implemented
+    lld_revision: r1
+    # Delivered by E1 — see coverage-e1.yaml. Not re-designed in E2.
+
+  - req: REQ-story-25-snippet-based-search-results
+    lld: v2/lld-e2-search.md#LLD-e2-service-search
+    issue: REC-4
+    files: []
+    status: Approved
+    lld_revision: r1
+
+  - req: REQ-story-54-storage-namespace-search-path
+    lld: v2/lld-e2-search.md#LLD-e2-storage-search
+    issue: REC-3
+    files:
+      - src/recall/storage_adapter.py
+    status: Implemented
+    lld_revision: r1
+    # Extends E1's REQ-story-54 isolation guarantee to the search path (LIKE-prefix leak closed).
