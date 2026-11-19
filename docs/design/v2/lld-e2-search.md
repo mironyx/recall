@@ -7,16 +7,16 @@
 | Epic | E2 — Search |
 | Phase | 2 |
 | Epic issue | REC-2 |
-| Task issues | REC-3 (E2.1), REC-4 (E2.2), REC-5 (E2.3), REC-6 (E2.4) |
+| Task issues | REC-3 (E2.1), REC-4 (E2.2), REC-5 (E2.3), REC-6 (E2.4), REC-7 (E2.5, router hardening, runs before REC-6) |
 | HLD components | Memory Service, Tool Router, Storage Adapter |
 | ADRs | 0001 (flat schema), 0002 (namespace), 0004 (filters), 0010 (ranking), 0012 (real Postgres), 0015 (scope-explicit IDs) |
-| Status | Approved — REC-3 implemented (PR #122), REC-4–REC-6 pending |
+| Status | Approved — REC-3 implemented (PR #122), REC-4–REC-7 pending |
 | Parent | [v2-design.md](../v2-design.md) |
 | Requirements | [Epic 2](../../requirements/v2-requirements.md#epic-2-memory-retrieval--search) |
 
 > **Provenance.** This LLD was reconstructed on 2026-11-19. The original was written
 > before REC-3 but never committed, so REC-3 was implemented from its issue body alone.
-> The task issue bodies (REC-3 to REC-6) carry the detailed contracts and BDD specs; this
+> The task issue bodies (REC-3 to REC-7) carry the detailed contracts and BDD specs; this
 > document is now their source of truth, and the issues link here.
 
 ## Open questions
@@ -119,8 +119,7 @@ reaches the router's log line only, never `search`.
 
 | Field | Env var | Default | Rationale |
 |-------|---------|---------|-----------|
-| `project_boost` | `RECALL_PROJECT_BOOST` | `0.05` | Strictly inside ADR-0010's `(0.02, 0.17)`, about 2σ of the stub embedder's noise |
-| `boost_window` | `RECALL_BOOST_WINDOW` | `10` | Merge headroom (REC-5 only) |
+| `project_boost` | `RECALL_PROJECT_BOOST` | `0.05` | Inside ADR-0010's `(0.02, 0.17)`: wide enough that hits within 0.02 resolve to project, narrow enough that a 0.92 global hit still beats a 0.75 project hit |
 | `default_limit` | `RECALL_DEFAULT_LIMIT` | `10` | Matches the store default |
 | `max_limit` | `RECALL_MAX_LIMIT` | `50` | Bounds context-window damage |
 | `snippet_max_chars` | `RECALL_SNIPPET_MAX_CHARS` | `200` | Story 2.5's default |
@@ -146,6 +145,23 @@ When `scope` is omitted, query both namespaces concurrently and merge with ADR-0
 project boost: project hits score `raw + project_boost`, global hits `raw`. The boost is a
 tie-breaker, never an override of relevance.
 
+**No fetch headroom.** ADR-0010 prescribes fetching `limit + boost_window` per namespace. The boost
+adds the same amount to every hit of a namespace, so it never reorders hits within one namespace, and
+any hit below that namespace's top `limit` cannot reach the merged top `limit`. The extra rows are
+never shown, so each namespace is fetched at exactly `limit` and the knob is removed. REC-5 records
+this in the same ADR-0010 amendment as OQ1.
+
+**Score semantics.** The returned `score` is the *ranking* score, so a merged search returns
+`raw + project_boost` for project hits (it can exceed 1.0) while an explicit-scope search returns the
+raw cosine similarity. The list is therefore always visibly sorted high to low. Tool descriptions
+and docs call it a relevance score, not a cosine value.
+
+**Known risk — filtered recall at scale.** The vector index returns its nearest candidates across all
+rows, and `asearch` applies the namespace and filter predicates afterwards. Once one project is a
+small share of the table, a search can return fewer than `limit` results, or none. Small test
+fixtures cannot show it. Accepted for v2 (single container, one team): mitigation is a pgvector
+setting (iterative scan or a higher `hnsw.ef_search`), deferred to E4 operations.
+
 ### Behavioural flow
 
 ```mermaid
@@ -156,7 +172,7 @@ sequenceDiagram
     participant DB as Postgres + pgvector
 
     R->>M: search(project_id, query, scope=None, ...)
-    Note over M: limit clamped to [1, max_limit], fetch = limit + boost_window per namespace
+    Note over M: limit clamped to [1, max_limit], fetch = limit per namespace
     par project namespace
         M->>S: search("project", project_id, query, filter, fetch)
         S->>DB: asearch, scope/project_id $eq injected
@@ -209,7 +225,7 @@ classDiagram
 | 1 | Tie resolves to project; a strong global hit beats a weak project hit | `TestMemoryServiceMergeRanking` (planted data) |
 | 2 | List is built project-first and sorted with a stable sort, so ties stay deterministic even at `project_boost = 0` | unit test with `project_boost = 0` |
 | 3 | A failure in either query propagates, no `return_exceptions=True` | `test_global_query_failure_propagates` (`failing_adapter`) |
-| 4 | Default search issues exactly two adapter calls, each at `limit + boost_window` | `test_default_search_issues_two_queries`, `test_fetches_merge_headroom` |
+| 4 | Default search issues exactly two adapter calls, each at exactly `limit` (no headroom, see §2.3) | `test_default_search_issues_two_queries`, `test_merge_fetches_exactly_limit` |
 | 5 | Results sorted by descending score, truncated to the effective limit | `test_results_ranked_by_descending_score`, `test_merge_truncates_to_limit` |
 
 ### Acceptance criteria
@@ -231,13 +247,43 @@ is `1.0` only for byte-identical indexed text, and any two distinct strings scor
 - **Tie:** two memories in different scopes with byte-identical `content`, query that string. Both score 1.0, so the boost decides.
 - **Strong global beats weak project:** global `content` byte-identical to the query, project `content` different. Global scores 1.0, project about 0 + 0.05.
 - Never assert graded similarity between different strings, it is flaky by construction.
-- `project_boost = 0.05` is about 2σ of the stub's noise, deliberately. Do not change the constant or the embedder in isolation.
+- For the stub only: `project_boost = 0.05` is about 2σ of its noise, so planted-data assertions stay stable. Do not change the constant or the embedder in isolation.
 
 ### BDD specs
 
 `TestMemoryServiceMergeRanking` (integration): tie favours project · strong global outranks weak
-project · both scopes in one list, each tagged · descending scores · two queries · merge headroom ·
+project · both scopes in one list, each tagged · descending scores · two queries · each fetched at exactly `limit` ·
 global failure propagates · truncation to limit.
+
+## 2.5 Tool Router hardening
+
+**Stories:** 4.3 AC4 (no stack traces), ADR-0011 (one `mcp_call` event per call)
+**Layers:** BE. Runs **before** REC-6 although numbered 2.5; it changes behaviour shared by all tools.
+
+### Purpose
+
+E1.6's router catches only `RecallError` and logs a thin event. This task closes both gaps for every
+tool, so `memory_search` (REC-6) inherits correct behaviour instead of carrying router changes itself.
+
+### Invariants
+
+| # | Invariant | Verification |
+|---|-----------|-------------|
+| 1 | An unexpected exception reaches the agent as a general `{error, hint}`, never a stack trace | `test_internal_error_is_generalised` |
+| 2 | Exactly one `mcp_call` event per call, success or failure | `test_one_log_event_per_call` |
+| 3 | The event carries `request_id`, `user_id`, `project_id`, `tool`, `kind`, `scope`, `result_count`, `latency_ms`, `result_status` | `test_mcp_call_event_fields` |
+| 4 | Existing E1 log assertions still pass (`result_status` keeps its name) | existing `tests/test_tool_router.py` unchanged |
+
+### Acceptance criteria
+
+- [ ] Catch-all in `handle_tool_call` logs the cause server-side and returns a general error
+- [ ] The log event is extended for all tools
+- [ ] A `captured_logs` fixture exists (structlog capture)
+
+### BDD specs
+
+`TestRouterHardening`: unexpected exception generalised · one event per call · event carries the
+required fields · `memory_save`/`memory_get` events keep working.
 
 ## 2.4 `memory_search` MCP tool
 
@@ -281,19 +327,18 @@ read its memories. Revisit if Story 5.3 is reinstated.
 |---|-----------|-------------|
 | 1 | The wire `user_id` maps to `author_user_id`; the authenticated caller is logging-only | `test_caller_identity_is_not_the_author_filter` (alice's token returns bob's memories) |
 | 2 | Handler is parse, delegate, return, and touches no store, adapter or embedder | AST unit test: the handler body references no `storage`/`embed` names |
-| 3 | Exactly one `mcp_call` event per call, never carrying `query`, `title`, `snippet` or `content` | `test_one_log_event_per_call`, `test_content_and_query_never_logged` |
+| 3 | The `mcp_call` event never carries `query`, `title`, `snippet` or `content` | `test_content_and_query_never_logged` |
 | 4 | An empty result is `[]`, never an error | `test_empty_results_not_an_error` |
 | 5 | At most 6 tools are exposed | `TestToolBudget.test_at_most_six_tools` |
-| 6 | Unexpected exceptions reach the agent as a general message with no stack trace (Story 4.3 AC4) | `test_internal_error_is_generalised` |
 
 ### Acceptance criteria
 
 - [ ] Declared with exactly `project_id`, `query`, `kind?`, `scope?`, `user_id?`, `limit?`
 - [ ] Description covers purpose, when to call, the project+global default, `scope` restriction, `kind="instruction"`, each parameter's type and constraints, and that an empty list is normal
 - [ ] `project_id` validated through `validate_project_id_format`
-- [ ] Structured `{error, hint}` for: missing or empty `query`, malformed `project_id`, invalid `scope`, non-integer `limit`, unauthenticated, unexpected internal error
+- [ ] `query` is rejected with `validation_error` above 2,000 characters (each search embeds it twice, so length is a cost path once a paid embedder is wired in E4)
+- [ ] Structured `{error, hint}` for: missing or empty `query`, malformed `project_id`, invalid `scope`, non-integer `limit`, unauthenticated (unexpected errors: REC-7)
 - [ ] The composition root loads the search config from the environment once and injects it
-- [ ] `mcp_call` event carries `request_id`, `user_id`, `project_id`, `tool`, `kind`, `scope`, `result_count`, `latency_ms`, `status`
 - [ ] Error formatting and `mcp_call` logging go through the existing single path
 - [ ] E2E tests prove the ranking properties with planted data
 
@@ -302,7 +347,7 @@ read its memories. Revisit if Story 5.3 is reinstated.
 `TestMemorySearchTool`, `TestSearchRankingEndToEnd`, `TestToolBudget` (integration). Cases: merged
 ranked list · result shape over transport · empty not an error · `kind` filter · scope restriction ·
 caller is not the author filter · requires auth · missing query · invalid `project_id` · invalid
-`scope` · internal error generalised · one log event per call · content and query never logged ·
+`scope` · query over 2,000 chars rejected · content and query never logged ·
 planted tie favours project · strong global beats weak project · at most six tools · description
 documents the scope default.
 
@@ -371,7 +416,6 @@ tests/test_memory_service.py  — four new search test classes
 @dataclass(frozen=True)
 class SearchConfig:
     project_boost: float = 0.05
-    boost_window: int = 10
     default_limit: int = 10
     max_limit: int = 50
     snippet_max_chars: int = 200
@@ -415,7 +459,7 @@ Edits `memory_service.py` (`scope` optional, `_merge`), `tests/conftest.py` (`fa
 
 ```python
 async def search(self, project_id, query, scope: str | None = None, ...) -> list[SearchResult]
-    # scope None: asyncio.gather(project query, global query) at limit + boost_window, then _merge
+    # scope None: asyncio.gather(project query, global query) at `limit`, then _merge
 def _merge(self, project: list[SearchResult], glob: list[SearchResult], limit: int) -> list[SearchResult]
     # boost project scores, concatenate project-first, sorted(..., key=score, reverse=True) (stable), [:limit]
 ```
@@ -429,6 +473,33 @@ byte-identical text (OQ1), and that memoisation at the composition root is the m
 embedding cost becomes material (E4.1). Do not implement memoisation here.
 
 `failing_adapter` wraps a real adapter and raises on the `("global", "_")` namespace only.
+
+<a id="LLD-e2-router-hardening"></a>
+
+## 2.5 Tool Router hardening — Implementation
+
+```text
+src/recall/tool_router.py     — catch-all in handle_tool_call, extended _log_call
+tests/test_tool_router.py     — TestRouterHardening
+tests/conftest.py             — captured_logs fixture
+```
+
+Two E1.6 behaviours fall short of the criteria and are fixed in the existing single path:
+
+1. `handle_tool_call` catches only `RecallError`. Add a catch-all that logs the cause server-side
+   and returns `{"error": "internal_error", "hint": <general message>}` with no stack trace (Story 4.3 AC4).
+2. `_log_call` emits `tool, user_id, project_id, latency_ms, result_status`. New signature:
+   `_log_call(tool_name, params, user_id, start, result_status, result_count: int | None = None)`.
+   `result_count` is set by `handle_tool_call` from the tool result (`len(result["results"])` for
+   search, `None` otherwise). `kind` and `scope` are read from `params` (empty string when absent).
+   `request_id` arrives through the structlog context bound by `RequestContextMiddleware`.
+   `result_status` keeps its name (E1 assertions unchanged); the criterion's `status` is satisfied by it.
+
+| Tool | `kind` | `scope` | `result_count` |
+|------|--------|---------|----------------|
+| `memory_save` | from params | from params | absent |
+| `memory_get` | absent | from params | absent |
+| `memory_search` | from params | from params, empty when searching both | `len(results)` |
 
 <a id="LLD-e2-search-tool"></a>
 
@@ -449,7 +520,7 @@ Named `test_e2e_search.py`, not `test_e2e_phase2.py`: phase numbers are not modu
 
 ```python
 class _SearchParams(NamedTuple):
-    query: str            # non-empty
+    query: str            # non-empty, ≤ _MAX_QUERY_CHARS (2000, module constant)
     project_id: str       # validate_project_id_format
     scope: str | None     # "project" | "global" | None (both)
     kind: str | None
@@ -465,33 +536,15 @@ def _parse_search_params(params: dict[str, Any]) -> _SearchParams
 > **Constraint:** the wire result is `{"results": list[SearchResult]}`; an empty search is
 > `{"results": []}`. This matches `handle_tool_call`'s `dict[str, Any]` return. The handler takes
 > `params` only, as `_handle_memory_get` does, so the authenticated caller cannot reach `search`.
-
-#### Router hardening (REC-6 scope, shared by all tools)
-
-Two E1.6 behaviours fall short of REC-6's criteria and are fixed in the existing single path:
-
-1. `handle_tool_call` catches only `RecallError`. Add a catch-all that logs the cause server-side
-   and returns `{"error": "internal_error", "hint": <general message>}` with no stack trace (Story 4.3 AC4).
-2. `_log_call` emits `tool, user_id, project_id, latency_ms, result_status`. New signature:
-   `_log_call(tool_name, params, user_id, start, result_status, result_count: int | None = None)`.
-   `result_count` is set by `handle_tool_call` from the tool result (`len(result["results"])` for
-   search, `None` otherwise). `kind` and `scope` are read from `params` (empty string when absent).
-   `request_id` arrives through the structlog context bound by `RequestContextMiddleware`.
-   `result_status` keeps its name (E1 assertions unchanged); the criterion's `status` is satisfied by it.
-
-| Tool | `kind` | `scope` | `result_count` |
-|------|--------|---------|----------------|
-| `memory_save` | from params | from params | absent |
-| `memory_get` | absent | from params | absent |
-| `memory_search` | from params | from params, empty when searching both | `len(results)` |
-
+>
 > **Fixtures.** `mcp_client`, `unauthenticated_client` and `captured_logs` do not exist anywhere in
-> `tests/` (checked 2026-11-19); `project_id` exists only in `tests/test_e2e_phase1.py`. Create the
-> missing ones in `tests/conftest.py`, and move `project_id` there rather than duplicating it.
+> `tests/` (checked 2026-11-19); `project_id` exists only in `tests/test_e2e_phase1.py`. REC-7 adds
+> `captured_logs`. REC-6 adds `mcp_client` and `unauthenticated_client` to `tests/conftest.py` and moves
+> `project_id` there rather than duplicating it.
 
 ## kb/ additions
 
-Add to `kb/architecture.md` as part of REC-4 and REC-6 respectively:
+Add to `kb/architecture.md` as part of REC-4:
 
 ```markdown
 - `src/recall/config.py` — `SearchConfig` + pure `load_search_config(env)`. Inject via constructors; never read `os.environ` in request paths or in `memory_service.py`.
@@ -507,7 +560,8 @@ Add to `kb/architecture.md` as part of REC-4 and REC-6 respectively:
 - §2.1 depends on: none
 - §2.2 depends on: [§2.1](#LLD-e2-storage-search)
 - §2.3 depends on: [§2.2](#LLD-e2-service-search)
-- §2.4 depends on: [§2.3](#LLD-e2-merge), and E1.6 (merged)
+- §2.5 depends on: [§2.3](#LLD-e2-merge)
+- §2.4 depends on: [§2.5](#LLD-e2-router-hardening), and E1.6 (merged)
 
 ### External
 
@@ -527,9 +581,10 @@ Add to `kb/architecture.md` as part of REC-4 and REC-6 respectively:
 | 1 | REC-3 | Storage adapter vector search | BE | none | Implemented (PR #122) |
 | 2 | REC-4 | Memory Service search: scoped query, filters, snippets | BE | Task 1 | Todo |
 | 3 | REC-5 | Memory Service merge: ADR-0010 ranking | BE | Task 2 | Todo |
-| 4 | REC-6 | `memory_search` MCP tool and ranking E2E tests | BE | Task 3 | Todo |
+| 4 | REC-7 | Tool Router hardening: catch-all errors, full `mcp_call` fields | BE | Task 3 | Todo |
+| 5 | REC-6 | `memory_search` MCP tool and ranking E2E tests | BE | Task 4 | Todo |
 
-Acceptance criteria and BDD specs per task are in §2.1 to §2.4 above; the issue bodies add
+Acceptance criteria and BDD specs per task are in §2.1 to §2.5 above; the issue bodies add
 file-level detail.
 
 ## Execution Order
@@ -538,7 +593,8 @@ file-level detail.
 graph LR
   T1["REC-3 · Storage vector search"] --> T2["REC-4 · Service scoped search"]
   T2 --> T3["REC-5 · Merge + ranking"]
-  T3 --> T4["REC-6 · memory_search tool"]
+  T3 --> T5["REC-7 · Router hardening"]
+  T5 --> T4["REC-6 · memory_search tool"]
 ```
 
-Waves are strictly sequential: each task edits files the next one extends.
+Waves are strictly sequential (REC-3, REC-4, REC-5, REC-7, REC-6): each task edits files the next one extends.
