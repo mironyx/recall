@@ -33,6 +33,7 @@
 Skipped — no LLD covers this issue (`lld-e2-search.md` not on main).
 
 ## Cost retrospective
+
 | Bucket | Cost |
 |---|---|
 | To PR (checkpoint 10) | $1.24 |
