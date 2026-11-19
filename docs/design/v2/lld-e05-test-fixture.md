@@ -4,14 +4,14 @@
 
 | Field | Value |
 |-------|-------|
-| Parent epic | #72 — E0: Phase 0: Foundation |
-| Task issue | #77 — E0.5: Real-Postgres test fixture |
+| Parent epic | [#72](https://github.com/mironyx/recall/issues/72) — E0: Phase 0: Foundation |
+| Task issue | [#77](https://github.com/mironyx/recall/issues/77) — E0.5: Real-Postgres test fixture |
 | HLD components | Cross-cutting test infrastructure |
 | ADRs | ADR-0008, ADR-0012, ADR-0013 |
 | Version | 0.2 |
 | Status | Revised |
 | Date | 2026-04-12 |
-| Revised | 2026-08-06 | Issue #77 |
+| Revised | 2026-08-06 | Issue [#77](https://github.com/mironyx/recall/issues/77) |
 
 ---
 
@@ -177,7 +177,7 @@ class TestSmoke:
         aput raises (CHECK constraint)."""
 ```
 
-> **Implementation note (issue #77):** The test-author expanded the stub unit
+> **Implementation note (issue [#77](https://github.com/mironyx/recall/issues/77)):** The test-author expanded the stub unit
 > suite beyond the five BDD specs above — custom-dimension vectors, empty-input
 > handling, and the public `dim` attribute are all covered in
 > `tests/test_stub_embeddings.py` (13 tests).
@@ -238,7 +238,7 @@ class StubEmbeddingsProvider:
 This ensures: deterministic, different inputs → different vectors, correct
 dimension, unit norm.
 
-> **Implementation note (issue #77):** The draft proposed unpacking the hash
+> **Implementation note (issue [#77](https://github.com/mironyx/recall/issues/77)):** The draft proposed unpacking the hash
 > bytes directly as IEEE-754 floats (`struct.unpack(f'{dim}f', ...)`). Raw
 > hash bytes frequently form NaN/inf bit patterns, which corrupt normalisation.
 > The implementation instead reinterprets the bytes as unsigned ints and maps
@@ -316,7 +316,7 @@ async def store(_store_session, pg_conn_string: str):
   be installed for `psycopg` async connections. `pytest-asyncio` handles the
   loop; session-scoped async fixtures use `scope="session"`.
 
-> **Implementation note (issue #77):** The draft referenced `apply_pending`
+> **Implementation note (issue [#77](https://github.com/mironyx/recall/issues/77)):** The draft referenced `apply_pending`
 > (the pre-ADR-0013 migration runner) and raw asyncpg connections. By the time
 > this landed, ADR-0013 had replaced the migration runner with the idempotent
 > `ensure_schema()` setup, and raw DB access (TRUNCATE, schema checks) uses
@@ -345,7 +345,7 @@ class TestSmoke:
 
 ### Files
 
-Implemented as a single task (#77):
+Implemented as a single task ([#77](https://github.com/mironyx/recall/issues/77)):
 
 - `tests/conftest.py` — session-scoped container, per-test TRUNCATE, apply_pending
 - `src/recall/embeddings/__init__.py` — package marker

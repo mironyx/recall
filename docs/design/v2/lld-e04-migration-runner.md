@@ -4,14 +4,14 @@
 
 | Field | Value |
 |-------|-------|
-| Parent epic | #72 — E0: Phase 0: Foundation |
-| Task issue | #76 — E0.4: Migration runner and initial schema |
+| Parent epic | [#72](https://github.com/mironyx/recall/issues/72) — E0: Phase 0: Foundation |
+| Task issue | [#76](https://github.com/mironyx/recall/issues/76) — E0.4: Migration runner and initial schema |
 | HLD components | Migration Runner, CLI |
 | ADRs | ADR-0001, ADR-0002, ADR-0013 (revised), ADR-0014 |
 | Version | 0.2 |
 | Status | Revised |
 | Date | 2026-04-22 (rewrite of 2026-04-12 original) |
-| Revised | 2026-04-30 | Issue #76 |
+| Revised | 2026-04-30 | Issue [#76](https://github.com/mironyx/recall/issues/76) |
 
 ---
 
@@ -211,7 +211,7 @@ async def ensure_schema(conn_string: str) -> None:
         await conn.execute(_SCOPE_CHECK_SQL)
 ```
 
-> **Implementation note (issue #76):** Step 3 (projects table creation) was removed per ADR-0014. `ensure_schema` now creates only `store`, `store_vectors`, and the scope CHECK constraint. The `projects` table and its `CHECK (lower(id) != 'global')` constraint are deferred; projects are inferred from `store.prefix` instead.
+> **Implementation note (issue [#76](https://github.com/mironyx/recall/issues/76)):** Step 3 (projects table creation) was removed per ADR-0014. `ensure_schema` now creates only `store`, `store_vectors`, and the scope CHECK constraint. The `projects` table and its `CHECK (lower(id) != 'global')` constraint are deferred; projects are inferred from `store.prefix` instead.
 
 #### `src/recall/cli.py`
 
@@ -244,11 +244,11 @@ store is usable).
 - `tests/test_schema.py` — integration tests
 - `tests/test_cli.py` — updated CLI tests
 
-### Deleted files (from PR #82, if any were merged)
+### Deleted files (from PR [#82](https://github.com/mironyx/recall/issues/82), if any were merged)
 
 - `src/recall/db/migrations.py` — replaced by `schema.py`
 - `src/recall/migrations/` — entire directory, no longer needed
 - `tests/test_migrations.py` — replaced by `test_schema.py`
 - `tests/evaluation/test_e04_migration_runner_eval.py` — no longer applicable
 
-> **Implementation note (issue #76):** No projects-related files were created. The `projects` table, the `recall projects` CLI subgroup, and `TestProjectsTable` tests are all deferred per ADR-0014.
+> **Implementation note (issue [#76](https://github.com/mironyx/recall/issues/76)):** No projects-related files were created. The `projects` table, the `recall projects` CLI subgroup, and `TestProjectsTable` tests are all deferred per ADR-0014.
