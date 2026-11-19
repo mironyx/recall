@@ -1,4 +1,4 @@
-"""Core memory lifecycle — save and get (Phase 1). Search/update/delete in later phases."""
+"""Core memory lifecycle — save, get and search. Update/delete in later phases."""
 
 from __future__ import annotations
 
