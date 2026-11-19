@@ -7,6 +7,7 @@
 - **Pressure:** standard — ~35 src lines in 1 file (plus pyproject pins, conftest fixture, tests).
 
 ## Cost checkpoints
+
 | Step | Timestamp | Cost (cumulative) | Tokens (cumulative) | Note |
 |------|-----------|--------------------|----------------------|------|
 | 3c | 2026-11-18T18:06:50Z | $0.53 | 2,281 in / 5,800 out | pressure: standard — ~35 src lines, 1 file [models: claude-sonnet-5-5 $0.53, claude-haiku-5-5 $0.00] |
