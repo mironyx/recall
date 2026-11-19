@@ -7,6 +7,7 @@
 - **Pressure:** standard — ~70 src lines across 3 source files (config.py, models.py, memory_service.py), 2 test files
 
 ## Cost checkpoints
+
 | Step | Timestamp | Cost (cumulative) | Tokens (cumulative) | Note |
 |------|-----------|--------------------|----------------------|------|
 | 3c | 2026-11-19T09:10:12Z | $0.28 | 2,075 in / 1,592 out | pressure: standard — ~70 src lines, 3 src files [models: claude-sonnet-5-5 $0.28, claude-haiku-5-5 $0.00] |
@@ -17,6 +18,7 @@
 | 6b | 2026-11-19T09:13:25Z | $0.97 | 6,616 in / 22,255 out | evaluator: PASS WITH WARNINGS — brief: used as-is [models: claude-sonnet-5-5 $0.97, claude-haiku-5-5 $0.00] |
 | 8 | 2026-11-19T09:13:41Z | $0.99 | 6,620 in / 22,966 out | [PR #125](https://github.com/mironyx/recall/pull/125) [models: claude-sonnet-5-5 $0.99, claude-haiku-5-5 $0.00] |
 | 9 | 2026-11-19T09:14:59Z | $1.29 | 6,637 in / 26,555 out | review: 2 warns (docstring fixed, _FixedAdapter accepted) [models: claude-sonnet-5-5 $1.29, claude-haiku-5-5 $0.00] |
+| 10 | 2026-11-19T09:15:46Z | $1.34 | 6,645 in / 27,479 out | report done; CI fixing md lint [models: claude-sonnet-5-5 $1.34, claude-haiku-5-5 $0.00] |
 
 ## Concerns & Deferred Items
 
