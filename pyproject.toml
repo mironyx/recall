@@ -10,8 +10,8 @@ authors = [{ name = "Leonid" }]
 dependencies = [
     # Pinned loosely; lock via uv.lock
     "mcp>=2.0.0",                     # MCP server SDK — 2026-07-28 spec revision (stateless, no initialize)
-    "langgraph>=0.2",                 # AsyncPostgresStore + namespace API
-    "langgraph-checkpoint-postgres",  # Postgres backend for langgraph store
+    "langgraph>=1.1,<2",              # AsyncPostgresStore + namespace API
+    "langgraph-checkpoint-postgres>=3.0.5,<4",  # Postgres backend; asearch LIKE-prefix behaviour verified on 3.0.5
     "asyncpg>=0.29",
     "pgvector>=0.3",
     "openai>=1.40",                   # embeddings (or compatible client)
