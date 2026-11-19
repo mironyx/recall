@@ -19,3 +19,26 @@
 - Skipped `edf:diag` (CodeScene/Sonar) and `edf:feature-evaluator`: test-author covered all 12 BDD specs plus 3 extras; flagged for reviewer.
 - Interpretation: caller filter keys `scope`/`project_id` are rejected (outside `{kind, user_id}`), not silently overridden. `_scoping_filter` still adds its keys last.
 - Review: uv.lock revision 3→5 churn from newer uv — reverted (2-line fix, self-checked, no re-review).
+
+## Work completed
+- PR #122: `StorageAdapter.search` — namespace-exact `asearch` wrapper (`src/recall/storage_adapter.py`), 19 tests added, `counting_adapter` fixture, langgraph pins.
+
+## Decisions made
+- Caller filter keys outside `{kind, user_id}` are rejected, not overridden (see Concerns).
+
+## Review feedback addressed
+- [warn] uv.lock — revision churn reverted in 507bea9.
+
+## LLD Sync report
+Skipped — no LLD covers this issue (`lld-e2-search.md` not on main).
+
+## Cost retrospective
+| Bucket | Cost |
+|---|---|
+| To PR (checkpoint 10) | $1.24 |
+| Final query | $0.28 (undercount suspected) |
+
+- Main CI was red from markdownlint at PR time; fixed by #123, which blocked the merge until it landed.
+
+## Next steps
+- REC-4 (E2.2) next; E2 LLD still needs to land on main (branch `docs/e2-search`).
