@@ -1,4 +1,4 @@
-"""Core memory lifecycle — save and get (Phase 1). Search/update/delete in later phases."""
+"""Core memory lifecycle — save, get and search. Update/delete in later phases."""
 
 from __future__ import annotations
 
@@ -6,15 +6,69 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from langgraph.store.base import SearchItem
+
+from recall.config import SearchConfig
 from recall.errors import NotFoundError
+from recall.models import SearchResult
 from recall.storage_adapter import StorageAdapter
 
 
 class MemoryService:
     """Orchestrates memory operations: build value, delegate to storage, direct get-by-id."""
 
-    def __init__(self, storage: StorageAdapter) -> None:
+    def __init__(self, storage: StorageAdapter, search_config: SearchConfig | None = None) -> None:
         self._storage = storage
+        self._search_config = search_config or SearchConfig()
+
+    async def search(
+        self,
+        project_id: str,
+        query: str,
+        scope: str,
+        kind: str | None = None,
+        author_user_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[SearchResult]:
+        """Search one explicit scope. ``author_user_id`` is the memory's author to
+        filter by — NOT the authenticated caller (Story 5.2 AC3)."""
+        items = await self._storage.search(
+            scope=scope,
+            project_id=project_id,
+            query=query,
+            filter=self._build_filter(kind, author_user_id),
+            limit=self._clamp_limit(limit),
+        )
+        return [self._to_result(item, item.score or 0.0) for item in items]
+
+    def _clamp_limit(self, limit: int | None) -> int:
+        cfg = self._search_config
+        return max(1, min(cfg.default_limit if limit is None else limit, cfg.max_limit))
+
+    @staticmethod
+    def _build_filter(kind: str | None, author_user_id: str | None) -> dict[str, str] | None:
+        # The stored `user_id` is the author; the filter key is storage-level.
+        filt = {}
+        if kind is not None:
+            filt["kind"] = kind
+        if author_user_id is not None:
+            filt["user_id"] = author_user_id
+        return filt or None
+
+    def _to_result(self, item: SearchItem, score: float) -> SearchResult:
+        v = item.value
+        return SearchResult(
+            id=item.key,
+            scope=v["scope"],
+            project_id=v["project_id"],
+            kind=v["kind"],
+            title=v["title"],
+            snippet=self._snippet(v["content"]),
+            score=score,
+        )
+
+    def _snippet(self, content: str) -> str:
+        return content[: self._search_config.snippet_max_chars]
 
     async def save(
         self,

@@ -30,16 +30,18 @@ import json
 import os
 import uuid
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import psycopg
 import pytest
 import pytest_asyncio
+from langgraph.store.base import SearchItem
 
+from recall.config import SearchConfig
 from recall.errors import NotFoundError, ValidationError
 from recall.memory_service import MemoryService
-from recall.models import MemoryResponse
+from recall.models import MemoryResponse, SearchResult
 from recall.storage_adapter import GLOBAL_SENTINEL, StorageAdapter
 
 if TYPE_CHECKING:
@@ -341,3 +343,395 @@ class TestMemoryServiceGet:
                 await service.get_by_id("project", "proj-42", unknown_id)
             assert exc_info.value.error == "not_found"
             assert unknown_id in exc_info.value.hint
+
+
+# ---------------------------------------------------------------------------
+# search() — REC-4 (E2.2), LLD §2.2 anchor LLD-e2-service-search
+# ---------------------------------------------------------------------------
+
+_PROJECT = "proj-42"
+
+
+class _RecordingAdapter:
+    """Delegating decorator over a real ``StorageAdapter`` that records the
+    arguments of every ``search`` call. Every call is forwarded to the real
+    adapter/store — nothing is stubbed (CLAUDE.md: never mock the store)."""
+
+    def __init__(self, inner: StorageAdapter) -> None:
+        self._inner = inner
+        self.search_calls: list[dict[str, Any]] = []
+
+    async def search(self, **kwargs: Any) -> list[SearchItem]:
+        self.search_calls.append(kwargs)
+        return await self._inner.search(**kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+async def _save(
+    service: MemoryService,
+    *,
+    scope: str = "project",
+    user_id: str = "alice",
+    kind: str = "decision",
+    title: str = "Use event sourcing",
+    content: str = "The billing service uses event sourcing.",
+) -> str:
+    project_id = _PROJECT if scope == "project" else GLOBAL_SENTINEL
+    return await service.save(
+        scope=scope,
+        project_id=project_id,
+        user_id=user_id,
+        kind=kind,
+        title=title,
+        content=content,
+    )
+
+
+@pytest.mark.integration
+class TestMemoryServiceSearchScoped:
+    """REC-4 — one explicit scope, no merge, no boost, no over-fetch."""
+
+    async def test_scope_project_excludes_global(self, service: MemoryService) -> None:
+        """Given scope='project', no global memory appears."""
+        project_id = await _save(service, scope="project")
+        global_id = await _save(service, scope="global")
+
+        results = await service.search(_PROJECT, "event sourcing", scope="project")
+
+        ids = {r.id for r in results}
+        assert project_id in ids
+        assert global_id not in ids
+        assert all(r.scope == "project" for r in results)
+
+    async def test_scope_global_excludes_project(self, service: MemoryService) -> None:
+        """Given scope='global', no project memory appears."""
+        project_id = await _save(service, scope="project")
+        global_id = await _save(service, scope="global")
+
+        results = await service.search(GLOBAL_SENTINEL, "event sourcing", scope="global")
+
+        ids = {r.id for r in results}
+        assert global_id in ids
+        assert project_id not in ids
+        assert all(r.scope == "global" for r in results)
+
+    async def test_other_project_is_isolated(self, service: MemoryService) -> None:
+        """Given a memory in another project, a project search never returns it
+        (Story 5.4 AC3)."""
+        await service.save(
+            scope="project",
+            project_id="other-proj",
+            user_id="alice",
+            kind="decision",
+            title="t",
+            content="The billing service uses event sourcing.",
+        )
+
+        assert await service.search(_PROJECT, "event sourcing", scope="project") == []
+
+    async def test_explicit_scope_applies_no_boost(
+        self, service: MemoryService, store: AsyncPostgresStore
+    ) -> None:
+        """Given scope='project', the score equals the raw store score."""
+        memory_id = await _save(service)
+
+        raw = await store.asearch(("project", _PROJECT), query="event sourcing billing")
+        raw_score = next(i.score for i in raw if i.key == memory_id)
+        results = await service.search(_PROJECT, "event sourcing billing", scope="project")
+
+        score = next(r.score for r in results if r.id == memory_id)
+        assert raw_score is not None
+        assert score == pytest.approx(raw_score)
+
+    async def test_explicit_scope_issues_one_query(self, counting_adapter: StorageAdapter) -> None:
+        """Given an explicit scope, exactly one adapter search call is made."""
+        service = MemoryService(counting_adapter)
+        await _save(service)
+        counting_store = counting_adapter.counting_store  # type: ignore[attr-defined]
+        before = counting_store.asearch_calls
+
+        await service.search(_PROJECT, "event sourcing", scope="project")
+
+        assert counting_store.asearch_calls - before == 1
+
+    async def test_explicit_scope_does_not_over_fetch(self, store: AsyncPostgresStore) -> None:
+        """Given an explicit scope, the adapter is called with limit, not limit + window."""
+        recorder = _RecordingAdapter(StorageAdapter(store))
+        service = MemoryService(recorder)  # type: ignore[arg-type]
+        for i in range(8):
+            await _save(service, title=f"m{i}", content=f"event sourcing note {i}")
+
+        results = await service.search(_PROJECT, "event sourcing", scope="project", limit=3)
+
+        assert len(recorder.search_calls) == 1
+        assert recorder.search_calls[0]["limit"] == 3
+        assert len(results) == 3
+
+    async def test_scope_invariant_violation_propagates(self, service: MemoryService) -> None:
+        """Given a (scope, project_id) pair violating the invariant, the adapter's
+        ValidationError propagates unchanged (LLD error handling)."""
+        with pytest.raises(ValidationError):
+            await service.search(_PROJECT, "x", scope="global")
+
+    def test_search_signature_has_no_tags_or_project_ids(self) -> None:
+        """No `tags` (ADR-0004) and no `project_ids` parameter; the author filter is
+        named author_user_id, never user_id; scope is required."""
+        import inspect
+
+        params = inspect.signature(MemoryService.search).parameters
+
+        assert "tags" not in params
+        assert "project_ids" not in params
+        assert "user_id" not in params
+        assert params["author_user_id"].default is None
+        assert params["scope"].default is inspect.Parameter.empty
+
+
+@pytest.mark.integration
+class TestMemoryServiceSearchFilters:
+    """REC-4 — kind / author_user_id become conjunctive storage filters (Story 2.3)."""
+
+    async def test_kind_filter(self, service: MemoryService) -> None:
+        """Given kind='decision', only decision memories return."""
+        await _save(service, kind="decision")
+        await _save(service, kind="gotcha")
+
+        results = await service.search(_PROJECT, "event sourcing", "project", kind="decision")
+
+        assert results
+        assert {r.kind for r in results} == {"decision"}
+
+    async def test_author_user_id_filter(self, service: MemoryService) -> None:
+        """Given author_user_id='alice', only alice's memories return."""
+        alice_id = await _save(service, user_id="alice")
+        bob_id = await _save(service, user_id="bob")
+
+        results = await service.search(
+            _PROJECT, "event sourcing", "project", author_user_id="alice"
+        )
+
+        ids = {r.id for r in results}
+        assert ids == {alice_id}
+        assert bob_id not in ids
+
+    async def test_kind_and_author_filters_are_conjunctive(self, service: MemoryService) -> None:
+        """Given kind='convention' and author_user_id='alice', both constraints hold."""
+        wanted = await _save(service, user_id="alice", kind="convention")
+        await _save(service, user_id="alice", kind="decision")
+        await _save(service, user_id="bob", kind="convention")
+        await _save(service, user_id="bob", kind="decision")
+
+        results = await service.search(
+            _PROJECT, "event sourcing", "project", kind="convention", author_user_id="alice"
+        )
+
+        assert [r.id for r in results] == [wanted]
+
+    async def test_kind_and_scope_are_conjunctive(self, service: MemoryService) -> None:
+        """Given kind='convention' and scope='project', a global convention is excluded
+        (Story 2.3 AC6)."""
+        wanted = await _save(service, scope="project", kind="convention")
+        await _save(service, scope="global", kind="convention")
+
+        results = await service.search(_PROJECT, "event sourcing", "project", kind="convention")
+
+        assert [r.id for r in results] == [wanted]
+
+    async def test_other_users_memories_visible_by_default(self, service: MemoryService) -> None:
+        """Given memories by alice and bob and no author filter, both appear (Story 5.2 AC3)."""
+        alice_id = await _save(service, user_id="alice")
+        bob_id = await _save(service, user_id="bob")
+
+        results = await service.search(_PROJECT, "event sourcing", "project")
+
+        assert {alice_id, bob_id} <= {r.id for r in results}
+
+    async def test_no_filters_returns_all_kinds(self, service: MemoryService) -> None:
+        """Given only a query and scope, results span kinds."""
+        await _save(service, kind="decision")
+        await _save(service, kind="gotcha")
+        await _save(service, kind="component")
+
+        results = await service.search(_PROJECT, "event sourcing", "project")
+
+        assert {r.kind for r in results} == {"decision", "gotcha", "component"}
+
+
+@pytest.mark.integration
+class TestMemoryServiceSearchSnippets:
+    """REC-4 / Story 2.5 — snippet = content[:cap], no ellipsis; full result shape."""
+
+    async def test_long_content_truncated_to_cap(self, service: MemoryService) -> None:
+        """Given content longer than 200 chars, the snippet is exactly 200 and is
+        the content prefix with no ellipsis."""
+        content = "".join(chr(ord("a") + (i % 26)) for i in range(500))
+        await _save(service, content=content)
+
+        results = await service.search(_PROJECT, "abc", "project")
+
+        assert len(results) == 1
+        assert len(results[0].snippet) == 200
+        assert results[0].snippet == content[:200]
+        assert "..." not in results[0].snippet
+        assert "\u2026" not in results[0].snippet
+
+    async def test_content_of_exactly_cap_is_unaltered(self, service: MemoryService) -> None:
+        """Given content exactly 200 chars long, the snippet is the whole content."""
+        content = "x" * 200
+        await _save(service, content=content)
+
+        results = await service.search(_PROJECT, "x", "project")
+
+        assert results[0].snippet == content
+
+    async def test_short_content_returned_unaltered(self, service: MemoryService) -> None:
+        """Given content shorter than the cap, snippet == content byte-for-byte
+        (no padding, no stripping)."""
+        content = "  Short note with  spaces,\nnewline and unicode: caf\u00e9 \u2713  "
+        await _save(service, content=content)
+
+        results = await service.search(_PROJECT, "short note", "project")
+
+        assert results[0].snippet == content
+
+    async def test_snippet_cap_comes_from_injected_config(self, store: AsyncPostgresStore) -> None:
+        """Given SearchConfig(snippet_max_chars=20), snippets are capped at 20."""
+        service = MemoryService(StorageAdapter(store), SearchConfig(snippet_max_chars=20))
+        content = "0123456789" * 10
+        await _save(service, content=content)
+
+        results = await service.search(_PROJECT, "0123", "project")
+
+        assert results[0].snippet == content[:20]
+
+    async def test_result_shape(self, service: MemoryService) -> None:
+        """Given any result, it carries id, scope, project_id, kind, title, snippet, score."""
+        memory_id = await _save(service, kind="gotcha", title="A title")
+
+        results = await service.search(_PROJECT, "event sourcing", "project")
+
+        assert len(results) == 1
+        result = results[0]
+        assert isinstance(result, SearchResult)
+        assert result.id == memory_id
+        assert result.scope == "project"
+        assert result.project_id == _PROJECT
+        assert result.kind == "gotcha"
+        assert result.title == "A title"
+        assert result.snippet == "The billing service uses event sourcing."
+        assert isinstance(result.score, float)
+        assert "content" not in result.model_dump()
+
+    async def test_global_result_carries_sentinel_project_id(self, service: MemoryService) -> None:
+        """Given a global hit, project_id is '_' so ADR-0015 tools can act on it."""
+        memory_id = await _save(service, scope="global")
+
+        results = await service.search(GLOBAL_SENTINEL, "event sourcing", "global")
+
+        assert [r.id for r in results] == [memory_id]
+        assert results[0].project_id == GLOBAL_SENTINEL
+        assert results[0].scope == "global"
+
+    async def test_none_score_maps_to_zero(self) -> None:
+        """Given a store item whose score is None (store parse failure), the result
+        score is 0.0 (invariant 6). Uses a fixed-result adapter because a real
+        store never yields None on demand; no database is involved."""
+        now = datetime.now(UTC)
+        item = SearchItem(
+            namespace=("project", _PROJECT),
+            key=str(uuid.uuid4()),
+            value={
+                "scope": "project",
+                "project_id": _PROJECT,
+                "user_id": "alice",
+                "kind": "decision",
+                "title": "t",
+                "content": "c",
+            },
+            created_at=now,
+            updated_at=now,
+            score=None,
+        )
+
+        class _FixedAdapter:
+            async def search(self, **kwargs: Any) -> list[SearchItem]:
+                return [item]
+
+        service = MemoryService(_FixedAdapter())  # type: ignore[arg-type]
+
+        results = await service.search(_PROJECT, "q", "project")
+
+        assert len(results) == 1
+        assert results[0].score == 0.0
+
+
+@pytest.mark.integration
+class TestMemoryServiceSearchLimits:
+    """REC-4 — limit defaults to 10 and clamps to [1, max_limit] (Story 2.1 AC4)."""
+
+    async def _seed(self, service: MemoryService, n: int) -> None:
+        for i in range(n):
+            await _save(service, title=f"m{i}", content=f"event sourcing note {i}")
+
+    async def test_default_limit_applied(self, service: MemoryService) -> None:
+        """Given no limit and 20 matches, 10 results return."""
+        await self._seed(service, 20)
+
+        results = await service.search(_PROJECT, "event sourcing", "project")
+
+        assert len(results) == 10
+
+    async def test_limit_respected(self, service: MemoryService) -> None:
+        """Given limit=5 and 20 matches, 5 results return."""
+        await self._seed(service, 20)
+
+        results = await service.search(_PROJECT, "event sourcing", "project", limit=5)
+
+        assert len(results) == 5
+
+    async def test_limit_clamped_to_max(self, service: MemoryService) -> None:
+        """Given limit=5000, at most max_limit (50) results return."""
+        await self._seed(service, 60)
+
+        results = await service.search(_PROJECT, "event sourcing", "project", limit=5000)
+
+        assert len(results) == 50
+
+    @pytest.mark.parametrize("limit", [0, -3])
+    async def test_limit_below_one_clamps_to_one(self, service: MemoryService, limit: int) -> None:
+        """Given limit<=0, the effective limit is 1."""
+        await self._seed(service, 5)
+
+        results = await service.search(_PROJECT, "event sourcing", "project", limit=limit)
+
+        assert len(results) == 1
+
+    async def test_limits_come_from_injected_config(self, store: AsyncPostgresStore) -> None:
+        """Given SearchConfig(default_limit=3, max_limit=4), default is 3 and the
+        clamp is 4 — config is injected, not hard-coded."""
+        service = MemoryService(StorageAdapter(store), SearchConfig(default_limit=3, max_limit=4))
+        await self._seed(service, 10)
+
+        default = await service.search(_PROJECT, "event sourcing", "project")
+        clamped = await service.search(_PROJECT, "event sourcing", "project", limit=100)
+
+        assert len(default) == 3
+        assert len(clamped) == 4
+
+    async def test_empty_result_is_not_an_error(self, service: MemoryService) -> None:
+        """Given no matches, an empty list is returned."""
+        assert await service.search(_PROJECT, "anything at all", "project") == []
+
+
+class TestMemoryServiceSourceHygiene:
+    """REC-4 invariant 5 — the service never reads the environment."""
+
+    def test_memory_service_does_not_read_environ(self) -> None:
+        """`environ` does not appear in memory_service.py (grep -c == 0)."""
+        import recall.memory_service as module
+
+        assert module.__file__ is not None
+        with open(module.__file__, encoding="utf-8") as fh:
+            assert "environ" not in fh.read()
