@@ -21,8 +21,9 @@ entries:
   - req: REQ-story-22-merged-project-and-global-results
     lld: v2/lld-e2-search.md#LLD-e2-merge
     issue: REC-5
-    files: []
-    status: Approved
+    files:
+      - src/recall/memory_service.py
+    status: Implemented
     lld_revision: r1
 
   - req: REQ-story-23-search-filtering

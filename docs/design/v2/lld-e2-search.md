@@ -10,7 +10,7 @@
 | Task issues | REC-3 (E2.1), REC-4 (E2.2), REC-5 (E2.3), REC-6 (E2.4), REC-7 (E2.5, router hardening, runs before REC-6) |
 | HLD components | Memory Service, Tool Router, Storage Adapter |
 | ADRs | 0001 (flat schema), 0002 (namespace), 0004 (filters), 0010 (ranking), 0012 (real Postgres), 0015 (scope-explicit IDs) |
-| Status | Approved — REC-3 implemented (PR #122), REC-4–REC-7 pending |
+| Status | Approved — REC-3 (PR #122), REC-4 and REC-5 (PR #126) implemented, REC-6–REC-7 pending |
 | Parent | [v2-design.md](../v2-design.md) |
 | Requirements | [Epic 2](../../requirements/v2-requirements.md#epic-2-memory-retrieval--search) |
 
@@ -230,10 +230,10 @@ classDiagram
 
 ### Acceptance criteria
 
-- [ ] `scope` optional; omitted means both namespaces via `asyncio.gather`
-- [ ] Explicit `scope` keeps REC-4 behaviour: one query, no boost, no over-fetch
-- [ ] A failure-injecting double over the real adapter raises on the global namespace only
-- [ ] ADR-0010 Consequences amended for OQ1 (two embedding calls); no memoisation implemented here
+- [x] `scope` optional; omitted means both namespaces via `asyncio.gather`
+- [x] Explicit `scope` keeps REC-4 behaviour: one query, no boost, no over-fetch
+- [x] A failure-injecting double over the real adapter raises on the global namespace only
+- [x] ADR-0010 Consequences amended for OQ1 (two embedding calls); no memoisation implemented here
 
 ### Test-data planting recipe
 
@@ -581,7 +581,7 @@ Add to `kb/architecture.md` as part of REC-4:
 |------|-------|-------|-------|------------|--------|
 | 1 | REC-3 | Storage adapter vector search | BE | none | Implemented (PR #122) |
 | 2 | REC-4 | Memory Service search: scoped query, filters, snippets | BE | Task 1 | Todo |
-| 3 | REC-5 | Memory Service merge: ADR-0010 ranking | BE | Task 2 | Todo |
+| 3 | REC-5 | Memory Service merge: ADR-0010 ranking | BE | Task 2 | Implemented (PR #126) |
 | 4 | REC-7 | Tool Router hardening: catch-all errors, full `mcp_call` fields | BE | Task 3 | Todo |
 | 5 | REC-6 | `memory_search` MCP tool and ranking E2E tests | BE | Task 4 | Todo |
 
