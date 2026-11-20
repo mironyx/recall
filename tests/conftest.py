@@ -220,6 +220,30 @@ def counting_adapter(store: object) -> object:
     return adapter
 
 
+class _FailingGlobalAdapter:
+    """Decorator over a real ``StorageAdapter`` whose ``search`` raises on the
+    ``("global", "_")`` namespace only. Everything else is forwarded (ADR-0012)."""
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    async def search(self, **kwargs: object) -> object:
+        if kwargs.get("scope") == "global":
+            raise RuntimeError("global namespace query failed")
+        return await self._inner.search(**kwargs)  # type: ignore[attr-defined]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+
+@pytest.fixture
+def failing_adapter(store: object) -> object:
+    """A real-store adapter that raises when the global namespace is searched."""
+    from recall.storage_adapter import StorageAdapter
+
+    return _FailingGlobalAdapter(StorageAdapter(store))  # type: ignore[arg-type]
+
+
 # ---------------------------------------------------------------------------
 # Logging reset — configure_logging must be reversible across tests
 # ---------------------------------------------------------------------------

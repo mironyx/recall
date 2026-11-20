@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -11,7 +12,7 @@ from langgraph.store.base import SearchItem
 from recall.config import SearchConfig
 from recall.errors import NotFoundError
 from recall.models import SearchResult
-from recall.storage_adapter import StorageAdapter
+from recall.storage_adapter import GLOBAL_SENTINEL, StorageAdapter
 
 
 class MemoryService:
@@ -25,21 +26,43 @@ class MemoryService:
         self,
         project_id: str,
         query: str,
-        scope: str,
+        scope: str | None = None,
         kind: str | None = None,
         author_user_id: str | None = None,
         limit: int | None = None,
     ) -> list[SearchResult]:
-        """Search one explicit scope. ``author_user_id`` is the memory's author to
-        filter by — NOT the authenticated caller (Story 5.2 AC3)."""
-        items = await self._storage.search(
-            scope=scope,
-            project_id=project_id,
-            query=query,
-            filter=self._build_filter(kind, author_user_id),
-            limit=self._clamp_limit(limit),
+        """Search one explicit scope, or — when ``scope`` is None — project and
+        global merged with ADR-0010's additive project boost.
+
+        ``author_user_id`` is the memory's author to filter by — NOT the
+        authenticated caller (Story 5.2 AC3). Merged scores are ranking scores
+        (project hits ``raw + project_boost``); explicit-scope scores are raw.
+        A failure in either merged query propagates — no partial results.
+        """
+        filt = self._build_filter(kind, author_user_id)
+        effective = self._clamp_limit(limit)
+
+        async def one(sc: str, pid: str) -> list[SearchResult]:
+            items = await self._storage.search(
+                scope=sc, project_id=pid, query=query, filter=filt, limit=effective
+            )
+            return [self._to_result(item, item.score or 0.0) for item in items]
+
+        if scope is not None:
+            return await one(scope, project_id)
+        # Plain gather, no return_exceptions: partial results are worse than an error.
+        project, glob = await asyncio.gather(
+            one("project", project_id), one("global", GLOBAL_SENTINEL)
         )
-        return [self._to_result(item, item.score or 0.0) for item in items]
+        return self._merge(project, glob, effective)
+
+    def _merge(
+        self, project: list[SearchResult], glob: list[SearchResult], limit: int
+    ) -> list[SearchResult]:
+        boost = self._search_config.project_boost
+        boosted = [r.model_copy(update={"score": r.score + boost}) for r in project]
+        # Project-first + stable sort: ties resolve to project, even at boost 0.
+        return sorted(boosted + glob, key=lambda r: r.score, reverse=True)[:limit]
 
     def _clamp_limit(self, limit: int | None) -> int:
         cfg = self._search_config

@@ -19,8 +19,8 @@ The Memory Service component (HLD Level 2) owns this logic, and the Level 3 inte
 
 Recall v1's `memory_search` follows the **union-then-merge with a fixed additive boost** strategy:
 
-1. The Memory Service computes the query embedding **once**.
-2. It issues a vector search against the `("project", project_id)` namespace and another against `("global", null)`, each requesting `limit + boost_window` rows so the merge has headroom. Filters (`kind`, `user_id`) are applied at the storage layer in both queries.
+1. The Memory Service passes the query text to each namespace search; embedding happens inside the store (see Consequences).
+2. It issues a vector search against the `("project", project_id)` namespace and another against `("global", "_")`, concurrently, each requesting exactly `limit` rows. No headroom is needed: the boost adds the same amount to every hit of a namespace, so it never reorders hits within one namespace, and any hit below a namespace's top `limit` cannot reach the merged top `limit`. Filters (`kind`, `user_id`) are applied at the storage layer in both queries.
 3. Each row carries the raw cosine similarity returned by the store as `raw_score`.
 4. The Memory Service computes the final `score`:
    - `score = raw_score + PROJECT_BOOST` for project hits
@@ -30,7 +30,7 @@ Recall v1's `memory_search` follows the **union-then-merge with a fixed additive
 6. If `scope="project"` or `scope="global"` is passed explicitly, the corresponding query is skipped entirely and no merge happens.
 
 What this ADR does **not** decide:
-- The numeric value of `PROJECT_BOOST`, `boost_window`, or the default `limit`. Those are LLD-level knobs.
+- The numeric value of `PROJECT_BOOST` or the default `limit`. Those are LLD-level knobs.
 - Whether the store's vector search uses cosine, inner product, or L2 — the store's default suffices, the boost is applied to whatever the store returns.
 - Re-ranking with a cross-encoder. Out of scope for v1.
 
@@ -38,7 +38,6 @@ What this ADR does **not** decide:
 
 **Positive.**
 - The product rule from S1.3 ("project hits win ties, but a strong global hit can still outrank a weak project hit") is mechanically guaranteed by an additive boost — no edge case where global is silently invisible.
-- One embedding call per search regardless of how many namespaces are queried.
 - The merge happens in application code, not in a complex SQL union, so the Storage Adapter stays a thin wrapper (per ADR-0001 / ADR-0002 spirit).
 - The boost constant is a single tuning knob; reviewers can argue about its magnitude in one place.
 - `scope=project` / `scope=global` shortcuts cost zero at the merge stage — a single store query, no special-casing.
@@ -47,7 +46,8 @@ What this ADR does **not** decide:
 - **Two store round-trips per default search.** Mitigated by issuing them concurrently. The alternative (one query against a union view) couples the Storage Adapter to a query shape it does not otherwise need.
 - **An additive boost is crude.** A learned re-ranker would do better. We are deliberately not building one in v1; the boost is tunable post-deployment via env var, which is the right level of mechanism for v1.
 - **The constant will be wrong on first attempt.** Accepted — it is an env var, not a code change. The LLD will name a starting value and a tuning procedure (eyeball search results across a dozen real queries, adjust, repeat).
-- **Headroom (`boost_window`) costs a few extra rows per query.** Negligible.
+- **A merged search makes two embedding calls for byte-identical text.** `asearch(query=...)` in `langgraph-checkpoint-postgres` 3.0.5 embeds internally, per call, with no parameter for a pre-computed vector, so "one embedding call per search" is not achievable. Mitigation if embedding cost becomes material: memoise at the composition root via `PostgresIndexConfig(embed=...)` (E4.1, GH #91). Not implemented in E2.3.
+- **Returned `score` is the ranking score.** Merged project hits carry `raw + PROJECT_BOOST` and can exceed 1.0; explicit-scope searches return the raw cosine similarity. It is a relevance score, not a cosine value.
 
 **Not chosen, and why.**
 - **Hard sort by scope, then by score.** Violates the "strong global hit can outrank weak project hit" clause. Hard no.
