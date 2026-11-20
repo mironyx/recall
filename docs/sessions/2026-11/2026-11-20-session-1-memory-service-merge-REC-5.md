@@ -7,6 +7,7 @@
 - **Pressure:** light — ~20 src lines, 1 source file (plus conftest fixture, ADR edit, tests)
 
 ## Cost checkpoints
+
 | Step | Timestamp | Cost (cumulative) | Tokens (cumulative) | Note |
 |------|-----------|--------------------|----------------------|------|
 | 3c | 2026-11-20T09:56:58Z | $0.29 | 2,046 in / 1,761 out | pressure: light — ~20 src lines, 1 src file [models: claude-sonnet-5-5 $0.29, claude-haiku-5-5 $0.00] |
