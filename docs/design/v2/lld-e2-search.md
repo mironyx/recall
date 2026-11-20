@@ -429,6 +429,7 @@ class SearchResult(BaseModel):
 
 ```python
 def load_search_config(env: Mapping[str, str]) -> SearchConfig   # pure, raises ValidationError naming the variable
+def _parse[T: (int, float)](env, name, cast, default) -> T         # private: env lookup + cast, ValidationError naming `name`
 
 class MemoryService:
     def __init__(self, storage: StorageAdapter, search_config: SearchConfig | None = None) -> None

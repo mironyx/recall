@@ -9,8 +9,11 @@ entries:
   - req: REQ-story-21-semantic-search
     lld: v2/lld-e2-search.md#LLD-e2-service-search
     issue: REC-4
-    files: []
-    status: Approved
+    files:
+      - src/recall/config.py
+      - src/recall/models.py
+      - src/recall/memory_service.py
+    status: Implemented
     lld_revision: r1
     # Primary section: service search (REC-4). Also covered by LLD-e2-storage-search (REC-3,
     # implemented, PR #122) and LLD-e2-search-tool (REC-6).
@@ -25,8 +28,11 @@ entries:
   - req: REQ-story-23-search-filtering
     lld: v2/lld-e2-search.md#LLD-e2-service-search
     issue: REC-4
-    files: []
-    status: Approved
+    files:
+      - src/recall/config.py
+      - src/recall/models.py
+      - src/recall/memory_service.py
+    status: Implemented
     lld_revision: r1
     # Storage-side ADR-0004 key guard implemented in REC-3 (PR #122).
 
@@ -42,8 +48,11 @@ entries:
   - req: REQ-story-25-snippet-based-search-results
     lld: v2/lld-e2-search.md#LLD-e2-service-search
     issue: REC-4
-    files: []
-    status: Approved
+    files:
+      - src/recall/config.py
+      - src/recall/models.py
+      - src/recall/memory_service.py
+    status: Implemented
     lld_revision: r1
 
   - req: REQ-story-54-storage-namespace-search-path
