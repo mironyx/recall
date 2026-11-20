@@ -477,7 +477,7 @@ class TestMemoryServiceSearchScoped:
 
     def test_search_signature_has_no_tags_or_project_ids(self) -> None:
         """No `tags` (ADR-0004) and no `project_ids` parameter; the author filter is
-        named author_user_id, never user_id; scope is required."""
+        named author_user_id, never user_id; scope is optional (REC-5)."""
         import inspect
 
         params = inspect.signature(MemoryService.search).parameters
@@ -486,7 +486,7 @@ class TestMemoryServiceSearchScoped:
         assert "project_ids" not in params
         assert "user_id" not in params
         assert params["author_user_id"].default is None
-        assert params["scope"].default is inspect.Parameter.empty
+        assert params["scope"].default is None
 
 
 @pytest.mark.integration
@@ -735,3 +735,109 @@ class TestMemoryServiceSourceHygiene:
         assert module.__file__ is not None
         with open(module.__file__, encoding="utf-8") as fh:
             assert "environ" not in fh.read()
+
+
+@pytest.mark.integration
+class TestMemoryServiceMergeRanking:
+    """REC-5 — merged project + global search, ADR-0010 additive boost."""
+
+    async def test_tie_resolves_in_favour_of_project(self, service: MemoryService) -> None:
+        """Given byte-identical content in both scopes, the project hit ranks first."""
+        text = "identical tie content"
+        await _save(service, scope="global", content=text)
+        project_id = await _save(service, scope="project", content=text)
+
+        results = await service.search(_PROJECT, text)
+
+        assert results[0].id == project_id
+        assert results[0].scope == "project"
+
+    async def test_strong_global_outranks_weak_project(self, service: MemoryService) -> None:
+        """Given an exact-match global and a non-matching project memory, global wins."""
+        query = "exact global match"
+        global_id = await _save(service, scope="global", content=query)
+        await _save(service, scope="project", content="something else entirely")
+
+        results = await service.search(_PROJECT, query)
+
+        assert results[0].id == global_id
+
+    async def test_merged_list_includes_both_scopes(self, service: MemoryService) -> None:
+        """Given memories in both scopes, one list contains both, each tagged with scope."""
+        await _save(service, scope="global", content="shared topic")
+        await _save(service, scope="project", content="shared topic")
+
+        results = await service.search(_PROJECT, "shared topic")
+
+        assert {r.scope for r in results} == {"project", "global"}
+
+    async def test_results_ranked_by_descending_score(self, service: MemoryService) -> None:
+        """Given several matches, scores decrease monotonically down the list."""
+        for i in range(3):
+            await _save(service, scope="project", content=f"project memory {i}")
+            await _save(service, scope="global", content=f"global memory {i}")
+
+        results = await service.search(_PROJECT, "project memory 1")
+
+        scores = [r.score for r in results]
+        assert len(scores) == 6
+        assert scores == sorted(scores, reverse=True)
+
+    async def test_default_search_issues_two_queries(self, service: MemoryService) -> None:
+        """Given no scope, exactly two adapter search calls are made."""
+        rec = _RecordingAdapter(service._storage)
+        svc = MemoryService(rec)  # type: ignore[arg-type]
+
+        await svc.search(_PROJECT, "anything")
+
+        assert sorted((c["scope"], c["project_id"]) for c in rec.search_calls) == [
+            ("global", GLOBAL_SENTINEL),
+            ("project", _PROJECT),
+        ]
+
+    async def test_merge_fetches_exactly_limit(self, service: MemoryService) -> None:
+        """Given limit=5, each namespace is queried at exactly 5."""
+        rec = _RecordingAdapter(service._storage)
+        svc = MemoryService(rec)  # type: ignore[arg-type]
+
+        await svc.search(_PROJECT, "anything", limit=5)
+
+        assert [c["limit"] for c in rec.search_calls] == [5, 5]
+
+    async def test_global_query_failure_propagates(self, failing_adapter: Any) -> None:
+        """Given the global query raises, search raises — no project-only partial list."""
+        svc = MemoryService(failing_adapter)
+        await svc.save("project", _PROJECT, "alice", "decision", "t", "some content")
+
+        with pytest.raises(RuntimeError, match="global namespace"):
+            await svc.search(_PROJECT, "some content")
+
+    async def test_merge_truncates_to_limit(self, service: MemoryService) -> None:
+        """Given 20 matches across both scopes and limit=5, 5 results return."""
+        for i in range(10):
+            await _save(service, scope="project", content=f"match {i}")
+            await _save(service, scope="global", content=f"match {i}")
+
+        results = await service.search(_PROJECT, "match", limit=5)
+
+        assert len(results) == 5
+
+    async def test_project_first_stable_order_at_zero_boost(self, service: MemoryService) -> None:
+        """Given project_boost=0 and a tie, the project hit still ranks first."""
+        text = "zero boost tie"
+        await _save(service, scope="global", content=text)
+        project_id = await _save(service, scope="project", content=text)
+        svc = MemoryService(service._storage, SearchConfig(project_boost=0.0))
+
+        results = await svc.search(_PROJECT, text)
+
+        assert results[0].id == project_id
+
+    async def test_merged_project_score_includes_boost(self, service: MemoryService) -> None:
+        """Given an exact-match project hit, its score is raw (1.0) + project_boost."""
+        text = "boost visible"
+        await _save(service, scope="project", content=text)
+
+        results = await service.search(_PROJECT, text)
+
+        assert results[0].score == pytest.approx(1.0 + SearchConfig().project_boost, abs=1e-3)
