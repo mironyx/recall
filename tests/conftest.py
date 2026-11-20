@@ -13,8 +13,8 @@ import logging
 import os
 import sys
 import uuid
-from collections.abc import AsyncIterator, Generator, Iterator
-from typing import TYPE_CHECKING
+from collections.abc import AsyncIterator, Generator, Iterator, MutableMapping
+from typing import TYPE_CHECKING, Any
 
 import psycopg
 import pytest
@@ -275,3 +275,18 @@ def reset_logging() -> Iterator[None]:
     structlog.reset_defaults()
     # Clear any lingering contextvars.
     structlog.contextvars.clear_contextvars()
+
+
+@pytest.fixture
+def captured_logs() -> Iterator[list[MutableMapping[str, Any]]]:
+    """Capture structlog events as dicts (REC-7). Includes bound contextvars."""
+    import structlog
+
+    cap = structlog.testing.LogCapture()
+    # merge_contextvars so request-scoped fields (request_id) appear as in prod.
+    old = structlog.get_config()["processors"]
+    structlog.configure(processors=[structlog.contextvars.merge_contextvars, cap])
+    try:
+        yield cap.entries
+    finally:
+        structlog.configure(processors=old)
