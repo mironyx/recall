@@ -12,6 +12,8 @@
 |------|-----------|--------------------|----------------------|------|
 | 3c | 2026-11-20T10:18:12Z | $0.41 | 2,106 in / 5,537 out | pressure: light — ~20 src lines, 1 file [models: claude-sonnet-5-5 $0.41, claude-haiku-5-5 $0.00] |
 | 5 | 2026-11-20T10:18:12Z | $0.41 | 2,106 in / 5,537 out | green on attempt 1 (290 tests, mypy, ruff) [models: claude-sonnet-5-5 $0.41, claude-haiku-5-5 $0.00] |
+| 9 | 2026-11-20T10:20:33Z | $0.71 | 2,129 in / 9,910 out | review clean [models: claude-sonnet-5-5 $0.71, claude-haiku-5-5 $0.00] |
+| 10 | 2026-11-20T10:20:33Z | $0.71 | 2,129 in / 9,910 out | report done; CI pass [models: claude-sonnet-5-5 $0.71, claude-haiku-5-5 $0.00] |
 
 ## Concerns & Deferred Items
 
