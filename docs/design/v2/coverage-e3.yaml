@@ -1,0 +1,39 @@
+# Coverage manifest — Epic E3 (Update, delete, full surface)
+#
+# Maps requirements stories to LLD sections and implementing task issues.
+# `issue` values are backfilled by /architect once the tasks exist;
+# files are backfilled by edf:feature-end after merge.
+
+epic: e3
+entries:
+  - req: REQ-story-14-update-a-memory
+    lld: v2/lld-e3-update-delete-errors.md#LLD-e3-service-update
+    issue: REC-9
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Also satisfied by §3.2 (#LLD-e3-update-tool): the memory_update tool.
+
+  - req: REQ-story-15-delete-a-memory
+    lld: v2/lld-e3-update-delete-errors.md#LLD-e3-delete
+    issue: REC-11
+    files: []
+    status: Approved
+    lld_revision: r1
+
+  - req: REQ-story-43-structured-error-responses
+    lld: v2/lld-e3-update-delete-errors.md#LLD-e3-errors
+    issue: REC-12
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Completes the vocabulary; Phase 1 codes are Implemented in coverage-e1.yaml.
+    # Exit-criterion test matrix is §3.5 (#LLD-e3-tool-surface).
+
+  - req: REQ-story-42-agent-oriented-tool-descriptions
+    lld: v2/lld-e3-update-delete-errors.md#LLD-e3-update-tool
+    issue: REC-10
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Partial: descriptions for memory_update and memory_delete (§3.3, #LLD-e3-delete).

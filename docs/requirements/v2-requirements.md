@@ -4,11 +4,11 @@
 
 | Field | Value |
 |-------|-------|
-| Version | 0.3 |
+| Version | 0.5 |
 | Status | Draft — Complete |
 | Author | LS / Claude |
 | Created | 2026-04-12 |
-| Last updated | 2026-04-12 |
+| Last updated | 2026-11-21 |
 
 ## Change Log
 
@@ -18,6 +18,8 @@
 | 0.2 | 2026-04-12 | LS / Claude | Acceptance criteria for all stories |
 | 0.2.1 | 2026-04-12 | LS / Claude | Testability fixes: immutable scope AC (1.4), snippet length default (2.5), ranking wording (2.2), tool description specificity (3.2), agent instructions example AC (5.1) |
 | 0.3 | 2026-04-12 | LS / Claude | Merged hand-written REQUIREMENTS.md with skill-generated v2. Added Epics 3 (Self-Improving Instructions) and 5 (Project & Identity Scoping) with full ACs. Added Context, Design Principles, tool signature reference table, user_id field, anti-scope section, open questions. Renumbered epics. |
+| 0.4 | 2026-11-21 | LS / Claude | Story 1.4: `title` is updatable (design decision confirmed at E3 architect gate); `kind` stays immutable; metadata is replaced, not merged. `memory_update` tool row gains `title?`. Story 4.3: error codes are the stable `error` value; `hint` carries the detail (shipped wire shape). |
+| 0.5 | 2026-11-21 | LS / Claude | Story 1.4 AC7/Notes: `scope` and `project_id` locate the memory (ADR-0015), so they cannot express a change; a memory in another namespace is `not_found`. `kind`, `user_id`, `created_at`, `updated_at` are rejected by name. (LLD review finding.) |
 
 ---
 
@@ -157,9 +159,9 @@ The foundational data layer. An agent can persist memories with scope, kind, and
 - Given an existing memory ID and only tags provided (no content change), when I call the update operation, then the content and embedding remain unchanged.
 - Given a memory ID that does not exist, when I call the update operation, then the request is rejected with a structured error indicating the memory was not found.
 - Given an update request with no fields to update (empty payload), when I call the update operation, then the request is rejected with a structured error indicating no changes were provided.
-- Given an update request that attempts to change scope or project ID, when I call the update operation, then the request is rejected with a structured error indicating these fields are immutable.
+- Given an update request, then `scope` and `project_id` identify the memory's namespace and cannot be changed by the call (a memory stored under a different namespace is reported as not found); given an update request that includes `kind`, `user_id`, `created_at` or `updated_at`, then it is rejected with a structured `validation_error` naming the field as immutable.
 
-**Notes:** Scope and project ID are immutable after creation. Kind and title may be updatable (design decision to be confirmed at implementation).
+**Notes:** Scope, project ID, kind and author (`user_id`) are immutable after creation. `scope` and `project_id` are the call's namespace locators, so they cannot be sent as changes; `kind`, `user_id`, `created_at` and `updated_at` are rejected with a `validation_error` naming the field. `title`, `content`, `tags` and `metadata` are updatable; `tags` and `metadata` are replaced wholesale, not merged. Only a change to `content` re-embeds (decided at the E3 architect gate, 2026-11-21).
 
 ---
 
@@ -346,7 +348,7 @@ The following tools constitute the full MCP surface. This is the product interfa
 | 1 | `memory_save` | `scope`, `project_id?`, `kind`, `title`, `content`, `tags?`, `metadata?` | `{id}` | Persist a new memory. `scope` is `"project"` or `"global"`. `project_id` required when `scope="project"`, forbidden when `scope="global"`. |
 | 2 | `memory_search` | `project_id`, `query`, `kind?`, `scope?`, `user_id?`, `limit?` | `[{id, scope, kind, title, snippet, score}]` | Semantic search. Searches the given project **and** global by default; pass `scope` to restrict. Instructions are retrieved via `kind="instruction"`. |
 | 3 | `memory_get` | `scope`, `project_id`, `id` | Full memory record | Fetch the complete record for a memory found via search. The memory's `(scope, project_id)` namespace is required — id operations are namespace-explicit (ADR-0015). |
-| 4 | `memory_update` | `scope`, `project_id`, `id`, `content?`, `tags?`, `metadata?` | `{id}` | Update an existing memory's content, tags, or metadata. |
+| 4 | `memory_update` | `scope`, `project_id`, `id`, `title?`, `content?`, `tags?`, `metadata?` | `{id}` | Update an existing memory's title, content, tags, or metadata. At least one optional field is required. |
 | 5 | `memory_delete` | `scope`, `project_id`, `id` | `{ok}` | Permanently remove a memory. |
 
 **Note:** There is no dedicated `instructions_get` tool. Instructions are ordinary memories with `kind=instruction`, retrieved via `memory_search`. This keeps the tool count at 5, leaving room for a future tool within the ≤ 6 budget.
@@ -392,10 +394,10 @@ The following tools constitute the full MCP surface. This is the product interfa
 
 **Acceptance Criteria:**
 
-- Given any error condition (validation failure, not found, server error), when the error response is returned, then it contains at minimum an `error` field (human/agent-readable message) and a `hint` field (suggested recovery action).
-- Given a validation error (e.g., missing required field), when the error is returned, then the `error` field identifies which field failed validation and `hint` suggests the correction.
-- Given a not-found error (e.g., invalid memory ID), when the error is returned, then the `error` field states the ID was not found and `hint` suggests verifying the ID or searching first.
-- Given an internal server error, when the error is returned, then the `error` field gives a general message (not a stack trace) and `hint` suggests retrying.
+- Given any error condition (validation failure, not found, server error), when the error response is returned, then it contains at minimum an `error` field (a stable machine-readable code: `unauthenticated`, `validation_error`, `not_found`, `embedding_failed` or `internal_error`) and a `hint` field (agent-readable detail and suggested recovery action).
+- Given a validation error (e.g., missing required field), when the error is returned, then `error` is `validation_error` and `hint` identifies which field failed validation and suggests the correction.
+- Given a not-found error (e.g., invalid memory ID), when the error is returned, then `error` is `not_found` and `hint` states the ID was not found and suggests verifying the ID or searching first.
+- Given an internal server error, when the error is returned, then `error` is `internal_error` and `hint` gives a general message (not a stack trace) and suggests retrying.
 
 ---
 

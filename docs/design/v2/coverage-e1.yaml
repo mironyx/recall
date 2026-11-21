@@ -117,7 +117,7 @@ entries:
     files: []
     status: Draft
     lld_revision: r0
-    # Deferred to Phase 3 (E3.1).
+    # Deferred to Phase 3 — owned by coverage-e3.yaml (lld-e3-update-delete-errors.md §3.1).
 
   - req: REQ-story-15-delete-a-memory
     lld: null
@@ -125,4 +125,4 @@ entries:
     files: []
     status: Draft
     lld_revision: r0
-    # Deferred to Phase 3 (E3.2).
+    # Deferred to Phase 3 — owned by coverage-e3.yaml (lld-e3-update-delete-errors.md §3.3).
