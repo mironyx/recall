@@ -7,6 +7,7 @@
 - **Pressure:** standard — ~75 src lines, 2 src files (4 test files). Implemented inline rather than via test-author sub-agent.
 
 ## Cost checkpoints
+
 | Step | Timestamp | Cost (cumulative) | Tokens (cumulative) | Note |
 |------|-----------|--------------------|----------------------|------|
 | 5 | 2026-11-21T08:33:03Z | $0.68 | 2,166 in / 14,489 out | green: ruff, mypy --strict, 317 tests; no run scripts in repo [models: claude-sonnet-5-5 $0.68, claude-haiku-5-5 $0.00] |
