@@ -10,8 +10,10 @@
 | Step | Timestamp | Cost (cumulative) | Tokens (cumulative) | Note |
 |------|-----------|--------------------|----------------------|------|
 | 5 | 2026-11-21T08:33:03Z | $0.68 | 2,166 in / 14,489 out | green: ruff, mypy --strict, 317 tests; no run scripts in repo [models: claude-sonnet-5-5 $0.68, claude-haiku-5-5 $0.00] |
+| 9 | 2026-11-21T08:33:45Z | $1.00 | 2,189 in / 18,996 out | review: 0 blockers, 1 warn deferred (TODO) [models: claude-sonnet-5-5 $1.00, claude-haiku-5-5 $0.00] |
 
 ## Concerns & Deferred Items
 - E2E found: explicit `scope='global'` + `project_id` made the service/adapter raise the scope-invariant error; a REC-4 test (`test_scope_invariant_violation_propagates`) pins that service behaviour, so the router maps global to the sentinel (`tool_router.py` `_handle_memory_search`). LLD §2.4 should note this.
 - Repo has no `scripts/run-*.sh`; verification run directly with `uv run ruff/mypy/pytest` (317 passed).
 - Skipped test-author/evaluator sub-agents, CodeScene/Sonar diag and pr-review sub-skills were not run in this session; see PR.
+- pr-review warn: conftest `_PerCallClient` imports from `test_e2e_phase1` and uses `client._session` (`tests/conftest.py`). Deferred with TODO; helper-module extraction is a follow-up.

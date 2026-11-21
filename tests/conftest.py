@@ -350,6 +350,8 @@ def app(app_factory: Callable[[], Starlette]) -> Starlette:
     return app_factory()
 
 
+# TODO(REC-6): move _e2e_client/_unpack_result into a shared tests helper module so
+# conftest does not import from test_e2e_phase1 or touch client._session.
 class _PerCallClient:
     """MCP client that opens lifespan + transport around each call.
 
