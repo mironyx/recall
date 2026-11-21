@@ -33,9 +33,8 @@ Design notes:
 from __future__ import annotations
 
 import json
-import os
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -48,7 +47,6 @@ from mcp.types import CallToolResult, TextContent
 from starlette.applications import Starlette
 
 from recall.logging import configure_logging
-from recall.server import create_app
 from tests.conftest import _truncate_all
 
 AUTH_HEADERS = {"Authorization": "Bearer test-token"}
@@ -164,60 +162,11 @@ async def _save_memory(client: _McpClient) -> str:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def app(
-    pg_conn_string: str,
-    _migrated_db_sess: None,
-    tmp_path_factory: pytest.TempPathFactory,
-) -> Iterator[Starlette]:
-    """Starlette app with the MCP endpoint mounted (lifespan NOT entered).
-
-    Function-scoped because the store that ``create_app`` builds is a
-    single-use async context manager (``AsyncPostgresStore.from_conn_string``
-    drops its internals on first entry) — each test needs a fresh app to
-    enter its own lifespan. ``RECALL_AUTH_FILE`` points at a temp auth file
-    mapping the test token to ``alice`` (Story 5.6); embedding dim env vars
-    are cleared so the server defaults match the schema default 1536 that
-    ``ensure_schema`` used (schema.py / conftest). The lifespan is
-    deliberately not entered here: it runs the MCP session manager, an anyio
-    task group that must be entered and exited by the same task, but
-    pytest-asyncio tears async fixtures down in a different task than it
-    sets them up (and function-scoped fixtures on a different event loop
-    than the module-scoped tests). Each test instead enters lifespan +
-    client together inside ``_e2e_client``.
-    """
-    auth_file = tmp_path_factory.mktemp("e2e-auth") / "auth.json"
-    auth_file.write_text(json.dumps({"test-token": {"user_id": "alice"}}))
-
-    saved_env = {
-        var: os.environ.get(var)
-        for var in ("RECALL_AUTH_FILE", "RECALL_EMBEDDING_DIMS", "RECALL_EMBEDDINGS_DIM")
-    }
-    try:
-        os.environ["RECALL_AUTH_FILE"] = str(auth_file)
-        for var in ("RECALL_EMBEDDING_DIMS", "RECALL_EMBEDDINGS_DIM"):
-            os.environ.pop(var, None)
-
-        yield create_app(pg_conn_string)
-    finally:
-        for var, value in saved_env.items():
-            if value is None:
-                os.environ.pop(var, None)
-            else:
-                os.environ[var] = value
-
-
 @pytest_asyncio.fixture(autouse=True)
 async def _isolated_db(pg_conn_string: str) -> AsyncIterator[None]:
     """Per-test isolation — TRUNCATE data tables before each e2e test (E0.5)."""
     await _truncate_all(pg_conn_string)
     yield
-
-
-@pytest.fixture
-def project_id() -> str:
-    """A well-formed project identifier for e2e tests."""
-    return "proj-e2e"
 
 
 # ===========================================================================

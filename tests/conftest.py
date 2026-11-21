@@ -9,11 +9,12 @@ helpers. Tests that need a running container must be marked
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
 import uuid
-from collections.abc import AsyncIterator, Generator, Iterator, MutableMapping
+from collections.abc import AsyncIterator, Callable, Generator, Iterator, MutableMapping
 from typing import TYPE_CHECKING, Any
 
 import psycopg
@@ -21,6 +22,8 @@ import pytest
 import pytest_asyncio
 
 if TYPE_CHECKING:
+    from starlette.applications import Starlette
+
     # testcontainers ships without a py.typed marker; silence mypy's import-untyped check.
     from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
 
@@ -290,3 +293,104 @@ def captured_logs() -> Iterator[list[MutableMapping[str, Any]]]:
         yield cap.entries
     finally:
         structlog.configure(processors=old)
+
+
+# ---------------------------------------------------------------------------
+# MCP e2e fixtures (REC-6) — app factory, project_id, per-call MCP clients
+# ---------------------------------------------------------------------------
+
+ALICE_HEADERS = {"Authorization": "Bearer test-token"}
+BOB_HEADERS = {"Authorization": "Bearer bob-token"}
+
+
+@pytest.fixture
+def project_id() -> str:
+    """A well-formed project identifier for e2e tests."""
+    return "proj-e2e"
+
+
+@pytest.fixture
+def app_factory(
+    pg_conn_string: str,
+    _migrated_db_sess: None,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[Callable[[], Starlette]]:
+    """Factory of Starlette apps (lifespan NOT entered) over the test Postgres.
+
+    ``create_app``'s store is single-use, so each lifespan entry needs a fresh
+    app. ``RECALL_AUTH_FILE`` maps ``test-token`` to alice and ``bob-token`` to
+    bob (Story 5.6); embedding dim env vars are cleared so the server default
+    matches the schema default 1536. The lifespan is entered per client inside
+    the test's own task (anyio task groups cannot cross fixture tasks).
+    """
+    from recall.server import create_app
+
+    auth_file = tmp_path_factory.mktemp("e2e-auth") / "auth.json"
+    auth_file.write_text(
+        json.dumps({"test-token": {"user_id": "alice"}, "bob-token": {"user_id": "bob"}})
+    )
+    names = ("RECALL_AUTH_FILE", "RECALL_EMBEDDING_DIMS", "RECALL_EMBEDDINGS_DIM")
+    saved_env = {var: os.environ.get(var) for var in names}
+    try:
+        os.environ["RECALL_AUTH_FILE"] = str(auth_file)
+        for var in names[1:]:
+            os.environ.pop(var, None)
+        yield lambda: create_app(pg_conn_string)
+    finally:
+        for var, value in saved_env.items():
+            if value is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = value
+
+
+@pytest.fixture
+def app(app_factory: Callable[[], Starlette]) -> Starlette:
+    """A single Starlette app (lifespan NOT entered), for one-client tests."""
+    return app_factory()
+
+
+class _PerCallClient:
+    """MCP client that opens lifespan + transport around each call.
+
+    A client held open across fixture setup/teardown breaks anyio task groups
+    (see test_e2e_phase1 docstring), so each ``call_tool`` / ``list_tools``
+    enters a fresh app and client inside the calling test's task. Data persists
+    in Postgres between calls; ``as_user`` switches the bearer token.
+    """
+
+    def __init__(self, factory: Callable[[], Starlette], headers: dict[str, str]) -> None:
+        self._factory = factory
+        self._headers = headers
+
+    def as_user(self, headers: dict[str, str]) -> _PerCallClient:
+        return _PerCallClient(self._factory, headers)
+
+    async def call_tool(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Call a tool and return its decoded JSON payload."""
+        from tests.test_e2e_phase1 import _e2e_client, _unpack_result
+
+        async with _e2e_client(self._factory(), self._headers) as client:
+            return _unpack_result(await client.call_tool(name, params))
+
+    async def list_tools(self) -> list[Any]:
+        from tests.test_e2e_phase1 import _e2e_client
+
+        async with _e2e_client(self._factory(), self._headers) as client:
+            return list((await client._session.list_tools()).tools)
+
+
+@pytest_asyncio.fixture
+async def mcp_client(app_factory: Callable[[], Starlette], pg_conn_string: str) -> _PerCallClient:
+    """Authenticated (alice) MCP client over a TRUNCATEd database."""
+    await _truncate_all(pg_conn_string)
+    return _PerCallClient(app_factory, ALICE_HEADERS)
+
+
+@pytest_asyncio.fixture
+async def unauthenticated_client(
+    app_factory: Callable[[], Starlette], pg_conn_string: str
+) -> _PerCallClient:
+    """MCP client sending no bearer token."""
+    await _truncate_all(pg_conn_string)
+    return _PerCallClient(app_factory, {})

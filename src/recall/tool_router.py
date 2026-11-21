@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, NamedTuple
 
 import structlog
 
@@ -14,8 +14,18 @@ from recall.validation import validate_project_id_format
 
 log = structlog.get_logger()
 
+_MAX_QUERY_CHARS = 2000
 _INTERNAL_ERROR = "internal_error"
 _INTERNAL_HINT = "An unexpected error occurred. Retry; if it persists, contact the server operator."
+
+
+class _SearchParams(NamedTuple):
+    query: str
+    project_id: str
+    scope: str | None
+    kind: str | None
+    author_user_id: str | None  # wire "user_id": the memory's author, not the caller
+    limit: int | None
 
 
 class ToolRouter:
@@ -111,7 +121,48 @@ class ToolRouter:
             return await self._handle_memory_save(params, user_id)
         if tool_name == "memory_get":
             return await self._handle_memory_get(params)
+        if tool_name == "memory_search":
+            return await self._handle_memory_search(params)
         raise ValidationError(f"Unknown tool: {tool_name}")
+
+    async def _handle_memory_search(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Validate and delegate memory_search.
+
+        The authenticated caller is deliberately not a parameter: it must not
+        reach ``search`` (Story 5.2 AC3 — memories are shared within a project).
+        """
+        p = self._parse_search_params(params)
+        # The service takes a consistent (scope, project_id) pair; global
+        # memories live under the sentinel (ADR-0002), so map it here.
+        results = await self._memory_service.search(
+            project_id=GLOBAL_SENTINEL if p.scope == "global" else p.project_id,
+            query=p.query,
+            scope=p.scope,
+            kind=p.kind,
+            author_user_id=p.author_user_id,
+            limit=p.limit,
+        )
+        return {"results": [r.model_dump() for r in results]}
+
+    @staticmethod
+    def _parse_search_params(params: dict[str, Any]) -> _SearchParams:
+        """Validate memory_search params at the boundary (Story 2.x, 4.3)."""
+        query = params.get("query", "")
+        if not isinstance(query, str) or not query:
+            raise ValidationError("Missing required field: query")
+        if len(query) > _MAX_QUERY_CHARS:
+            raise ValidationError(f"query exceeds {_MAX_QUERY_CHARS} characters")
+        project_id = params.get("project_id", "")
+        validate_project_id_format(project_id)
+        scope = params.get("scope")
+        if scope not in (None, "project", "global"):
+            raise ValidationError(f"Invalid scope: {scope}")
+        limit = params.get("limit")
+        if limit is not None and (not isinstance(limit, int) or isinstance(limit, bool)):
+            raise ValidationError("limit must be an integer")
+        return _SearchParams(
+            query, project_id, scope, params.get("kind"), params.get("user_id"), limit
+        )
 
     async def _handle_memory_save(self, params: dict[str, Any], user_id: str) -> dict[str, Any]:
         """Validate and delegate memory_save."""
