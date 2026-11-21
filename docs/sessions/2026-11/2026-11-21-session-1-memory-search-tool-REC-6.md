@@ -50,7 +50,7 @@ File: docs/design/v2/lld-e2-search.md §2.4 (Status, Global scope, Server wiring
 Version: no Document Control version field to bump
 
 ## Cost retrospective
-Cost unavailable (Prometheus not configured); see checkpoints.
+PR-creation to final: $1.32 total, 24k output tokens, time to PR 3 min; no post-PR rework beyond one TODO commit.
 - Main driver: the global-scope defect surfaced only by the e2e test, costing one redesign (service fix reverted for router fix).
 
 ## Next steps
