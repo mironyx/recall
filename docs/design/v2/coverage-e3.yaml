@@ -8,7 +8,7 @@ epic: e3
 entries:
   - req: REQ-story-14-update-a-memory
     lld: v2/lld-e3-update-delete-errors.md#LLD-e3-service-update
-    issue: null
+    issue: REC-9
     files: []
     status: Approved
     lld_revision: r1
@@ -16,14 +16,14 @@ entries:
 
   - req: REQ-story-15-delete-a-memory
     lld: v2/lld-e3-update-delete-errors.md#LLD-e3-delete
-    issue: null
+    issue: REC-11
     files: []
     status: Approved
     lld_revision: r1
 
   - req: REQ-story-43-structured-error-responses
     lld: v2/lld-e3-update-delete-errors.md#LLD-e3-errors
-    issue: null
+    issue: REC-12
     files: []
     status: Approved
     lld_revision: r1
@@ -32,7 +32,7 @@ entries:
 
   - req: REQ-story-42-agent-oriented-tool-descriptions
     lld: v2/lld-e3-update-delete-errors.md#LLD-e3-update-tool
-    issue: null
+    issue: REC-10
     files: []
     status: Approved
     lld_revision: r1

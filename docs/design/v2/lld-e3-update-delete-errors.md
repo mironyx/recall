@@ -7,7 +7,7 @@
 | Epic | E3 — Update, delete, full surface |
 | Phase | 3 |
 | Epic issue | REC-8 |
-| Task issues | T1 (§3.1), T2 (§3.2), T3 (§3.3), T4 (§3.4), T5 (§3.5) — refs backfilled by `/architect` |
+| Task issues | REC-9 (§3.1), REC-10 (§3.2), REC-11 (§3.3), REC-12 (§3.4), REC-13 (§3.5) |
 | HLD components | Memory Service, Tool Router, Embedder (composition root) |
 | ADRs | 0001 (flat schema), 0002 (namespace), 0008 (embeddings provider), 0011 (observability), 0012 (real Postgres), 0014 (no project registry), 0015 (scope-explicit IDs) |
 | Status | Draft |
@@ -602,11 +602,11 @@ Add to `kb/architecture.md` as part of T4:
 
 | Task | Issue | Title | Layer | Depends on |
 |------|-------|-------|-------|------------|
-| 1 | T1 | Memory Service update — re-embed only on content change | BE | none |
-| 2 | T2 | `memory_update` MCP tool | BE | Task 1 |
-| 3 | T3 | `memory_delete` — storage, service and tool | BE | Task 2 |
-| 4 | T4 | Error vocabulary — `ErrorCode` registry and `embedding_failed` | BE | Task 3 |
-| 5 | T5 | Tool-surface happy/error coverage (Phase 3 exit) | BE | Task 3 |
+| 1 | REC-9 | Memory Service update — re-embed only on content change | BE | none |
+| 2 | REC-10 | `memory_update` MCP tool | BE | Task 1 |
+| 3 | REC-11 | `memory_delete` — storage, service and tool | BE | Task 2 |
+| 4 | REC-12 | Error vocabulary — `ErrorCode` registry and `embedding_failed` | BE | Task 3 |
+| 5 | REC-13 | Tool-surface happy/error coverage (Phase 3 exit) | BE | Task 3 |
 
 Acceptance criteria and BDD specs per task are in §3.1 to §3.5 above.
 
@@ -622,9 +622,9 @@ graph LR
 
 | Wave | Tasks | Blocked by | Notes |
 |------|-------|------------|-------|
-| 1 | T1 | — | Extends `memory_service.py`, `conftest.py` |
-| 2 | T2 | T1 | Shares `tool_router.py`, `server.py` with T3 and T4 |
-| 3 | T3 | T2 | Shares `memory_service.py`, `tool_router.py`, `server.py`, `test_e2e_update_delete.py` |
+| 1 | REC-9 | — | Extends `memory_service.py`, `conftest.py` |
+| 2 | REC-10 | T1 | Shares `tool_router.py`, `server.py` with T3 and T4 |
+| 3 | REC-11 | T2 | Shares `memory_service.py`, `tool_router.py`, `server.py`, `test_e2e_update_delete.py` |
 | 4 | T4, T5 | T3 | **Parallelisable.** T4 edits `errors.py`, `embeddings/provider.py`, `server.py`, `tool_router.py`, `conftest.py`. T5 adds one new test file and edits none of those. |
 
 Waves 1 to 3 are strictly sequential because each task edits files the next extends.
