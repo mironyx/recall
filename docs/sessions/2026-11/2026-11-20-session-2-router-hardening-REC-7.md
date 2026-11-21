@@ -19,3 +19,39 @@
 
 - `test_unexpected_service_error_propagates` (E1) asserted the old propagate behaviour; replaced by `TestRouterHardening.test_internal_error_is_generalised`.
 - `captured_logs` merges contextvars (structlog `capture_logs` does not), so `request_id` is assertable.
+
+## Work completed
+- PR #127: catch-all `internal_error` and fuller `mcp_call` event in `src/recall/tool_router.py`
+- Tests: `TestRouterHardening` (4 added), `captured_logs` fixture in `tests/conftest.py`
+- LLD wording fixed (invariant 3: `result_count` only when a `results` list is present)
+
+## Decisions made
+- The `internal_error` hint advises a retry. No LLD or ADR specifies that, so it was recorded in LLD §2.5; revisit if non-idempotent calls (`memory_save`) risk duplicate writes.
+
+## Review feedback addressed
+- Review was clean; the post-merge claims ledger flagged `result_count` wording — fixed in the LLD, not the code.
+
+## LLD Sync report
+## LLD Sync — Issue REC-7: Tool Router hardening
+
+### Corrections (spec was wrong)
+- Invariant 3 said the event always carries `result_count`; it is omitted unless the result has a `results` list (§2.5 invariants).
+
+### Additions (not in spec)
+- Exact internal-error hint text and its retry advice recorded in §2.5.
+
+### Omissions (in spec but not built)
+- None. `result_count` for search awaits REC-6 (`memory_search`).
+
+### Confirmations (notable)
+- `request_id` arrives via structlog context, as specified.
+
+### LLD updated
+File: docs/design/v2/lld-e2-search.md (status line, §2.5, invariant 3, task table)
+
+## Cost retrospective
+- PR-creation cost $0.44 (PR body); checkpoints show $0.71 at review. Final-cost query returned $0.00 (no Prometheus data), so no final figure is recorded.
+- Drivers: none notable — green on attempt 1, review clean.
+
+## Next steps
+- REC-6: `memory_search` MCP tool (also needs GH #91 landed).

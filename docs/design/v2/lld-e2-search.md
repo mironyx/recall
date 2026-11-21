@@ -10,7 +10,7 @@
 | Task issues | REC-3 (E2.1), REC-4 (E2.2), REC-5 (E2.3), REC-6 (E2.4), REC-7 (E2.5, router hardening, runs before REC-6) |
 | HLD components | Memory Service, Tool Router, Storage Adapter |
 | ADRs | 0001 (flat schema), 0002 (namespace), 0004 (filters), 0010 (ranking), 0012 (real Postgres), 0015 (scope-explicit IDs) |
-| Status | Approved — REC-3 (PR #122), REC-4 and REC-5 (PR #126) implemented, REC-6–REC-7 pending |
+| Status | Approved — REC-3 (PR #122), REC-4 (PR #125), REC-5 (PR #126) and REC-7 (PR #127) implemented, REC-6 pending |
 | Parent | [v2-design.md](../v2-design.md) |
 | Requirements | [Epic 2](../../requirements/v2-requirements.md#epic-2-memory-retrieval--search) |
 
@@ -271,7 +271,7 @@ tool, so `memory_search` (REC-6) inherits correct behaviour instead of carrying 
 |---|-----------|-------------|
 | 1 | An unexpected exception reaches the agent as a general `{error, hint}`, never a stack trace | `test_internal_error_is_generalised` |
 | 2 | Exactly one `mcp_call` event per call, success or failure | `test_one_log_event_per_call` |
-| 3 | The event carries `request_id`, `user_id`, `project_id`, `tool`, `kind`, `scope`, `result_count`, `latency_ms`, `result_status` | `test_mcp_call_event_fields` |
+| 3 | The event carries `request_id`, `user_id`, `project_id`, `tool`, `kind`, `scope`, `latency_ms`, `result_status`; it also carries `result_count` when the tool result contains a `results` list (search), and omits it otherwise | `test_mcp_call_event_fields` |
 | 4 | Existing E1 log assertions still pass (`result_status` keeps its name) | existing `tests/test_tool_router.py` unchanged |
 
 ### Acceptance criteria
@@ -488,7 +488,8 @@ tests/conftest.py             — captured_logs fixture
 Two E1.6 behaviours fall short of the criteria and are fixed in the existing single path:
 
 1. `handle_tool_call` catches only `RecallError`. Add a catch-all that logs the cause server-side
-   and returns `{"error": "internal_error", "hint": <general message>}` with no stack trace (Story 4.3 AC4).
+   and returns `{"error": "internal_error", "hint": "An unexpected error occurred. Retry; if it persists, contact the server operator."}`
+   with no stack trace (Story 4.3 AC4). The hint advises a retry because the failure is not classified.
 2. `_log_call` emits `tool, user_id, project_id, latency_ms, result_status`. New signature:
    `_log_call(tool_name, params, user_id, start, result_status, result_count: int | None = None)`.
    `result_count` is set by `handle_tool_call` from the tool result (`len(result["results"])` for
@@ -580,9 +581,9 @@ Add to `kb/architecture.md` as part of REC-4:
 | Task | Issue | Title | Layer | Depends on | Status |
 |------|-------|-------|-------|------------|--------|
 | 1 | REC-3 | Storage adapter vector search | BE | none | Implemented (PR #122) |
-| 2 | REC-4 | Memory Service search: scoped query, filters, snippets | BE | Task 1 | Todo |
+| 2 | REC-4 | Memory Service search: scoped query, filters, snippets | BE | Task 1 | Implemented (PR #125) |
 | 3 | REC-5 | Memory Service merge: ADR-0010 ranking | BE | Task 2 | Implemented (PR #126) |
-| 4 | REC-7 | Tool Router hardening: catch-all errors, full `mcp_call` fields | BE | Task 3 | Todo |
+| 4 | REC-7 | Tool Router hardening: catch-all errors, full `mcp_call` fields | BE | Task 3 | Implemented (PR #127) |
 | 5 | REC-6 | `memory_search` MCP tool and ranking E2E tests | BE | Task 4 | Todo |
 
 Acceptance criteria and BDD specs per task are in §2.1 to §2.5 above; the issue bodies add
