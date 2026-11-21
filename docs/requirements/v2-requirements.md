@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Version | 0.4 |
+| Version | 0.5 |
 | Status | Draft — Complete |
 | Author | LS / Claude |
 | Created | 2026-04-12 |
@@ -19,6 +19,7 @@
 | 0.2.1 | 2026-04-12 | LS / Claude | Testability fixes: immutable scope AC (1.4), snippet length default (2.5), ranking wording (2.2), tool description specificity (3.2), agent instructions example AC (5.1) |
 | 0.3 | 2026-04-12 | LS / Claude | Merged hand-written REQUIREMENTS.md with skill-generated v2. Added Epics 3 (Self-Improving Instructions) and 5 (Project & Identity Scoping) with full ACs. Added Context, Design Principles, tool signature reference table, user_id field, anti-scope section, open questions. Renumbered epics. |
 | 0.4 | 2026-11-21 | LS / Claude | Story 1.4: `title` is updatable (design decision confirmed at E3 architect gate); `kind` stays immutable; metadata is replaced, not merged. `memory_update` tool row gains `title?`. Story 4.3: error codes are the stable `error` value; `hint` carries the detail (shipped wire shape). |
+| 0.5 | 2026-11-21 | LS / Claude | Story 1.4 AC7/Notes: `scope` and `project_id` locate the memory (ADR-0015), so they cannot express a change; a memory in another namespace is `not_found`. `kind`, `user_id`, `created_at`, `updated_at` are rejected by name. (LLD review finding.) |
 
 ---
 
@@ -158,9 +159,9 @@ The foundational data layer. An agent can persist memories with scope, kind, and
 - Given an existing memory ID and only tags provided (no content change), when I call the update operation, then the content and embedding remain unchanged.
 - Given a memory ID that does not exist, when I call the update operation, then the request is rejected with a structured error indicating the memory was not found.
 - Given an update request with no fields to update (empty payload), when I call the update operation, then the request is rejected with a structured error indicating no changes were provided.
-- Given an update request that attempts to change scope or project ID, when I call the update operation, then the request is rejected with a structured error indicating these fields are immutable.
+- Given an update request, then `scope` and `project_id` identify the memory's namespace and cannot be changed by the call (a memory stored under a different namespace is reported as not found); given an update request that includes `kind`, `user_id`, `created_at` or `updated_at`, then it is rejected with a structured `validation_error` naming the field as immutable.
 
-**Notes:** Scope, project ID, kind and author (`user_id`) are immutable after creation; sending any of them to update is rejected with a `validation_error` naming the field. `title`, `content`, `tags` and `metadata` are updatable; `tags` and `metadata` are replaced wholesale, not merged. Only a change to `content` re-embeds (decided at the E3 architect gate, 2026-11-21).
+**Notes:** Scope, project ID, kind and author (`user_id`) are immutable after creation. `scope` and `project_id` are the call's namespace locators, so they cannot be sent as changes; `kind`, `user_id`, `created_at` and `updated_at` are rejected with a `validation_error` naming the field. `title`, `content`, `tags` and `metadata` are updatable; `tags` and `metadata` are replaced wholesale, not merged. Only a change to `content` re-embeds (decided at the E3 architect gate, 2026-11-21).
 
 ---
 
