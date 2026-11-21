@@ -1,4 +1,4 @@
-"""Core memory lifecycle — save, get and search. Update/delete in later phases."""
+"""Core memory lifecycle — save, get, search and update. Delete in a later phase."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 from langgraph.store.base import SearchItem
 
 from recall.config import SearchConfig
-from recall.errors import NotFoundError
+from recall.errors import NotFoundError, ValidationError
 from recall.models import SearchResult
 from recall.storage_adapter import GLOBAL_SENTINEL, StorageAdapter
 
@@ -176,3 +176,54 @@ class MemoryService:
             raise NotFoundError(memory_id)
 
         return {"id": memory_id, **item.value}
+
+    async def update(
+        self,
+        scope: str,
+        project_id: str,
+        memory_id: str,
+        title: str | None = None,
+        content: str | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """Update supplied fields of an existing memory (read-modify-write).
+
+        ``tags`` and ``metadata`` replace wholesale; ``created_at`` and the
+        author ``user_id`` are untouched. Re-embeds only when ``content``
+        actually differs from the stored value.
+
+        Raises:
+            ValidationError: no fields supplied, or scope invariant violation.
+            NotFoundError: memory not found in the given namespace.
+        """
+        if title is None and content is None and tags is None and metadata is None:
+            raise ValidationError(
+                "No fields to update: provide at least one of title, content, tags, metadata"
+            )
+        item = await self._storage.get(scope, project_id, memory_id)
+        if item is None:
+            raise NotFoundError(memory_id)
+        value = self._apply_changes(item.value, title, content, tags, metadata)
+        content_changed = content is not None and content != item.value["content"]
+        # index=False (not None): None would re-embed on every edit.
+        await self._storage.put(
+            scope=scope,
+            project_id=project_id,
+            key=memory_id,
+            value=value,
+            index=["content"] if content_changed else False,
+        )
+        return memory_id
+
+    @staticmethod
+    def _apply_changes(
+        stored: dict[str, Any],
+        title: str | None,
+        content: str | None,
+        tags: list[str] | None,
+        metadata: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        supplied = {"title": title, "content": content, "tags": tags, "metadata": metadata}
+        changes = {k: v for k, v in supplied.items() if v is not None}
+        return {**stored, **changes, "updated_at": datetime.now(UTC).isoformat()}
