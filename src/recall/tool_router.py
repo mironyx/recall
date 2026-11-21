@@ -48,9 +48,9 @@ def _check_text(name: str, value: object) -> None:
 
 
 def _check_update_types(params: dict[str, Any]) -> None:
-    """Type-check the optional update fields (``[]``/``{}`` valid, None = absent)."""
-    _check_text("title", params.get("title"))
-    _check_text("content", params.get("content"))
+    """Type-check the update fields (``[]``/``{}`` valid, None = absent)."""
+    for name in ("scope", "project_id", "id", "title", "content"):
+        _check_text(name, params.get(name))
     tags = params.get("tags")
     if tags is not None and not (isinstance(tags, list) and all(isinstance(t, str) for t in tags)):
         raise ValidationError("tags must be a list of strings")
