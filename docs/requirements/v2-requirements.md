@@ -393,10 +393,10 @@ The following tools constitute the full MCP surface. This is the product interfa
 
 **Acceptance Criteria:**
 
-- Given any error condition (validation failure, not found, server error), when the error response is returned, then it contains at minimum an `error` field (human/agent-readable message) and a `hint` field (suggested recovery action).
-- Given a validation error (e.g., missing required field), when the error is returned, then the `error` field identifies which field failed validation and `hint` suggests the correction.
-- Given a not-found error (e.g., invalid memory ID), when the error is returned, then the `error` field states the ID was not found and `hint` suggests verifying the ID or searching first.
-- Given an internal server error, when the error is returned, then the `error` field gives a general message (not a stack trace) and `hint` suggests retrying.
+- Given any error condition (validation failure, not found, server error), when the error response is returned, then it contains at minimum an `error` field (a stable machine-readable code: `unauthenticated`, `validation_error`, `not_found`, `embedding_failed` or `internal_error`) and a `hint` field (agent-readable detail and suggested recovery action).
+- Given a validation error (e.g., missing required field), when the error is returned, then `error` is `validation_error` and `hint` identifies which field failed validation and suggests the correction.
+- Given a not-found error (e.g., invalid memory ID), when the error is returned, then `error` is `not_found` and `hint` states the ID was not found and suggests verifying the ID or searching first.
+- Given an internal server error, when the error is returned, then `error` is `internal_error` and `hint` gives a general message (not a stack trace) and suggests retrying.
 
 ---
 
