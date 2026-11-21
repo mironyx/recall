@@ -14,9 +14,12 @@
 | 5 | 2026-11-21T12:30:44Z | $0.71 | 3,582 in / 15,772 out | green on attempt 1 (382 tests, mypy, ruff); e2e/audit n/a [models: claude-sonnet-5-5 $0.71, claude-haiku-5-5 $0.00] |
 | 6 | 2026-11-21T12:31:55Z | $1.03 | 3,601 in / 20,656 out | diag pass (codescene only; sonar skipped) [models: claude-sonnet-5-5 $1.03, claude-haiku-5-5 $0.00] |
 | 6b | 2026-11-21T12:31:55Z | $1.03 | 3,601 in / 20,656 out | evaluator: PASS — brief: used as-is [models: claude-sonnet-5-5 $1.03, claude-haiku-5-5 $0.00] |
+| 8 | 2026-11-21T12:32:12Z | $1.05 | 3,605 in / 21,737 out | [PR #132](https://github.com/mironyx/recall/pull/132) [models: claude-sonnet-5-5 $1.05, claude-haiku-5-5 $0.00] |
+| 9 | 2026-11-21T12:33:52Z | $1.37 | 3,632 in / 26,869 out | review: 1 warn fixed (non-str locators) [models: claude-sonnet-5-5 $1.37, claude-haiku-5-5 $0.00] |
 
 ## Concerns & Deferred Items
 - coverage-e3.yaml Story 1.4 entry marked Implemented by REC-9 but only the service half; re-check/complete files+issue once the tool lands (done in this PR).
-- `tool_router.py` `_parse_update_params`: scope/project_id/id not type-checked beyond truthiness (non-str id -> internal_error); same as `memory_get`, deferred.
 - CodeScene: `_check_update_types` cc=9, pre-existing `_parse_search_params` cc=12 / `_log_call` 6 args left as-is.
 - Evaluator: PASS, 0 adversarial tests. `scripts/run-*.sh` absent in worktree; used uv run directly.
+- CI red on main (MD058 in REC-9 session log); fixed that blank line here along with this log's own.
+- Review warn (non-str locators -> internal_error) fixed: locators now go through _check_text; test added.

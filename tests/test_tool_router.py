@@ -624,6 +624,14 @@ class TestMemoryUpdateValidation:
         assert result["error"] == "validation_error"
         assert missing in result["hint"]
 
+    @pytest.mark.parametrize("name", ["scope", "project_id", "id"])
+    async def test_non_string_locator_is_validation_error(self, name: str) -> None:
+        params = _update_params()
+        params[name] = 5
+        result = await _unit_router().handle_tool_call("memory_update", params, "alice")
+        assert result["error"] == "validation_error"
+        assert name in result["hint"]
+
     async def test_empty_payload_names_the_four_fields(self) -> None:
         params = _update_params()
         del params["title"]
