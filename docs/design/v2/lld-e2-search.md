@@ -10,7 +10,7 @@
 | Task issues | REC-3 (E2.1), REC-4 (E2.2), REC-5 (E2.3), REC-6 (E2.4), REC-7 (E2.5, router hardening, runs before REC-6) |
 | HLD components | Memory Service, Tool Router, Storage Adapter |
 | ADRs | 0001 (flat schema), 0002 (namespace), 0004 (filters), 0010 (ranking), 0012 (real Postgres), 0015 (scope-explicit IDs) |
-| Status | Approved — REC-3 (PR #122), REC-4 (PR #125), REC-5 (PR #126) and REC-7 (PR #127) implemented, REC-6 pending |
+| Status | Approved — REC-3 (PR #122), REC-4 (PR #125), REC-5 (PR #126), REC-7 (PR #127) and REC-6 (PR #128) implemented |
 | Parent | [v2-design.md](../v2-design.md) |
 | Requirements | [Epic 2](../../requirements/v2-requirements.md#epic-2-memory-retrieval--search) |
 
@@ -531,6 +531,7 @@ class _SearchParams(NamedTuple):
 
 async def _handle_memory_search(self, params: dict[str, Any]) -> dict[str, Any]
     # ≤ 15 lines: _parse_search_params, MemoryService.search, return {"results": [r.model_dump() ...]}
+    # passes project_id=GLOBAL_SENTINEL when scope == "global", else the validated project_id
 @staticmethod
 def _parse_search_params(params: dict[str, Any]) -> _SearchParams
 ```
@@ -539,10 +540,21 @@ def _parse_search_params(params: dict[str, Any]) -> _SearchParams
 > `{"results": []}`. This matches `handle_tool_call`'s `dict[str, Any]` return. The handler takes
 > `params` only, as `_handle_memory_get` does, so the authenticated caller cannot reach `search`.
 >
-> **Fixtures.** `mcp_client`, `unauthenticated_client` and `captured_logs` do not exist anywhere in
-> `tests/` (checked 2026-11-19); `project_id` exists only in `tests/test_e2e_phase1.py`. REC-7 adds
-> `captured_logs`. REC-6 adds `mcp_client` and `unauthenticated_client` to `tests/conftest.py` and moves
-> `project_id` there rather than duplicating it.
+> **Global scope.** `MemoryService.search` takes a consistent `(scope, project_id)` pair and the
+> adapter rejects `scope="global"` with a real `project_id` (ADR-0002). The wire contract still
+> requires `project_id`, so the router substitutes `GLOBAL_SENTINEL` for global-scope searches. Do not
+> relax the service instead: `test_scope_invariant_violation_propagates` pins its behaviour.
+>
+> **Server wiring.** `create_app` calls `load_search_config(os.environ)` once and passes the result
+> through `_build_lifespan` into `MemoryService`.
+>
+> **Fixtures** (`tests/conftest.py`). `app_factory` (one fresh app per lifespan entry; auth file maps
+> `test-token` to alice and `bob-token` to bob), `app`, `project_id`, `mcp_client` and
+> `unauthenticated_client`. The clients are `_PerCallClient`s that enter app lifespan and transport
+> around each `call_tool`/`list_tools`, because anyio task groups cannot cross pytest-asyncio fixture
+> tasks; `as_user(headers)` switches the bearer token. `captured_logs` comes from REC-7.
+> TODO(REC-6): `_PerCallClient` imports `_e2e_client` and `_unpack_result` from `test_e2e_phase1`;
+> move them to a shared helper module.
 
 ## kb/ additions
 
@@ -584,7 +596,7 @@ Add to `kb/architecture.md` as part of REC-4:
 | 2 | REC-4 | Memory Service search: scoped query, filters, snippets | BE | Task 1 | Implemented (PR #125) |
 | 3 | REC-5 | Memory Service merge: ADR-0010 ranking | BE | Task 2 | Implemented (PR #126) |
 | 4 | REC-7 | Tool Router hardening: catch-all errors, full `mcp_call` fields | BE | Task 3 | Implemented (PR #127) |
-| 5 | REC-6 | `memory_search` MCP tool and ranking E2E tests | BE | Task 4 | Todo |
+| 5 | REC-6 | `memory_search` MCP tool and ranking E2E tests | BE | Task 4 | Implemented (PR #128) |
 
 Acceptance criteria and BDD specs per task are in §2.1 to §2.5 above; the issue bodies add
 file-level detail.

@@ -17,3 +17,42 @@
 - Repo has no `scripts/run-*.sh`; verification run directly with `uv run ruff/mypy/pytest` (317 passed).
 - Skipped test-author/evaluator sub-agents, CodeScene/Sonar diag and pr-review sub-skills were not run in this session; see PR.
 - pr-review warn: conftest `_PerCallClient` imports from `test_e2e_phase1` and uses `client._session` (`tests/conftest.py`). Deferred with TODO; helper-module extraction is a follow-up.
+
+## Work completed
+- [PR #128](https://github.com/mironyx/recall/pull/128): `memory_search` tool, router handler/parser, server declaration and config wiring.
+- Files: `src/recall/tool_router.py`, `src/recall/server.py`, `tests/conftest.py`, `tests/test_e2e_search.py`, `tests/test_tool_router.py`.
+- Tests: 36 added (unit validation plus e2e ranking, auth, logging, tool budget); suite 317 passed.
+
+## Decisions made
+- Router maps `scope='global'` to the sentinel project_id; the service stays unchanged (REC-4 test pins it). See Concerns.
+- E2E clients open lifespan per call rather than per fixture (anyio task-group constraint).
+
+## Review feedback addressed
+- [maintainability] tests/conftest.py — deferred (TODO), not a defect: shared fixtures import from `test_e2e_phase1`. Review comment on PR #128.
+
+## LLD Sync report
+## LLD Sync — Issue REC-6: E2.4 memory_search MCP tool
+
+### Corrections (spec was wrong)
+- §2.4 handler: spec passed `project_id` straight through → router substitutes `GLOBAL_SENTINEL` for global scope — the adapter rejects global with a real project_id.
+
+### Additions (not in spec)
+- Fixtures: `app_factory`, `app`, per-call `_PerCallClient` with `as_user`, bob token; server wiring of `load_search_config` through `_build_lifespan` (§2.4).
+
+### Omissions (in spec but not built)
+- None.
+
+### Confirmations (notable)
+- Handler stays under 15 lines and reuses `validate_project_id_format`; caller identity never reaches `search`.
+
+### LLD updated
+File: docs/design/v2/lld-e2-search.md §2.4 (Status, Global scope, Server wiring, Fixtures notes; task table)
+Version: no Document Control version field to bump
+
+## Cost retrospective
+Cost unavailable (Prometheus not configured); see checkpoints.
+- Main driver: the global-scope defect surfaced only by the e2e test, costing one redesign (service fix reverted for router fix).
+
+## Next steps
+- Extract shared e2e helpers out of `test_e2e_phase1` (TODO in conftest).
+- Phase 2 exit criterion now covered; proceed to E3 (update/delete).
