@@ -346,6 +346,136 @@ class TestMemoryServiceGet:
 
 
 # ---------------------------------------------------------------------------
+# update() (REC-9, E3.1a)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestMemoryServiceUpdate:
+    """REC-9 — read-modify-write; re-embed only when content changes."""
+
+    async def _saved(self, service: MemoryService, **kw: Any) -> str:
+        return await service.save(**_save_args(**kw))
+
+    async def test_content_update_bumps_updated_at(self, service: MemoryService) -> None:
+        mid = await self._saved(service)
+        before = await service.get_by_id("project", "proj-42", mid)
+        assert await service.update("project", "proj-42", mid, content="new") == mid
+        after = await service.get_by_id("project", "proj-42", mid)
+        assert after["content"] == "new"
+        assert after["updated_at"] > before["updated_at"]
+
+    async def test_tags_replaced(self, service: MemoryService) -> None:
+        mid = await self._saved(service, tags=["a", "b"])
+        await service.update("project", "proj-42", mid, tags=["c"])
+        assert (await service.get_by_id("project", "proj-42", mid))["tags"] == ["c"]
+
+    async def test_metadata_replaced_wholesale(self, service: MemoryService) -> None:
+        mid = await self._saved(service, metadata={"a": 1, "b": 2})
+        await service.update("project", "proj-42", mid, metadata={"c": 3})
+        assert (await service.get_by_id("project", "proj-42", mid))["metadata"] == {"c": 3}
+
+    async def test_title_updated_and_searchable(self, service: MemoryService) -> None:
+        mid = await self._saved(service)
+        await service.update("project", "proj-42", mid, title="Brand new title")
+        got = await service.get_by_id("project", "proj-42", mid)
+        assert got["title"] == "Brand new title"
+        hits = await service.search("proj-42", "billing", scope="project")
+        assert [h.title for h in hits if h.id == mid] == ["Brand new title"]
+
+    async def test_metadata_only_update_does_not_re_embed(
+        self, service: MemoryService, embed_calls: list[list[str]]
+    ) -> None:
+        mid = await self._saved(service)
+        embed_calls.clear()
+        await service.update("project", "proj-42", mid, metadata={"x": 1})
+        assert embed_calls == []
+
+    async def test_content_update_re_embeds_once(
+        self, service: MemoryService, embed_calls: list[list[str]], pg_conn_string: str
+    ) -> None:
+        mid = await self._saved(service)
+        embed_calls.clear()
+        await service.update("project", "proj-42", mid, content="changed content")
+        assert embed_calls == [["changed content"]]
+        assert await _vector_row_count(pg_conn_string, mid, "project.proj-42") == 1
+
+    async def test_same_content_update_does_not_re_embed(
+        self, service: MemoryService, embed_calls: list[list[str]]
+    ) -> None:
+        mid = await self._saved(service)
+        embed_calls.clear()
+        await service.update(
+            "project", "proj-42", mid, content="The billing service uses event sourcing."
+        )
+        assert embed_calls == []
+
+    async def test_missing_id_not_found_single_get_no_put(self, store: AsyncPostgresStore) -> None:
+        from tests.conftest import _CountingStore
+
+        counting = _CountingStore(store)
+        svc = MemoryService(StorageAdapter(counting))  # type: ignore[arg-type]
+        with pytest.raises(NotFoundError):
+            await svc.update("project", "proj-42", str(uuid.uuid4()), title="x")
+        assert counting.aput_calls == 0
+
+    async def test_wrong_namespace_not_found(self, service: MemoryService) -> None:
+        mid = await self._saved(service)
+        with pytest.raises(NotFoundError):
+            await service.update("project", "other-proj", mid, title="x")
+
+    async def test_no_fields_rejected_before_storage(self, store: AsyncPostgresStore) -> None:
+        from tests.conftest import _CountingStore
+
+        counting = _CountingStore(store)
+        svc = MemoryService(StorageAdapter(counting))  # type: ignore[arg-type]
+        with pytest.raises(ValidationError, match="No fields to update"):
+            await svc.update("project", "proj-42", "any-id")
+        assert counting.aget_calls == 0
+        assert counting.aput_calls == 0
+
+    async def test_author_and_created_at_preserved(self, service: MemoryService) -> None:
+        mid = await self._saved(service)
+        before = await service.get_by_id("project", "proj-42", mid)
+        await service.update("project", "proj-42", mid, title="t2", content="c2")
+        after = await service.get_by_id("project", "proj-42", mid)
+        assert after["user_id"] == "alice"
+        assert after["created_at"] == before["created_at"]
+        assert after["kind"] == before["kind"]
+
+    async def test_scope_invariant_propagates(self, service: MemoryService) -> None:
+        with pytest.raises(ValidationError):
+            await service.update("global", "proj-42", "any-id", title="x")
+
+    async def test_failed_embed_on_content_update_leaves_record_intact(
+        self, service: MemoryService, pg_conn_string: str
+    ) -> None:
+        from langgraph.store.postgres import AsyncPostgresStore
+        from langgraph.store.postgres.base import PostgresIndexConfig
+
+        mid = await self._saved(service)
+
+        def _raise(texts: Sequence[str]) -> list[list[float]]:
+            raise RuntimeError("embedding provider unavailable")
+
+        raw_dims = os.environ.get("RECALL_EMBEDDING_DIMS")
+        config = PostgresIndexConfig(dims=int(raw_dims) if raw_dims else 1536, embed=_raise)
+        async with AsyncPostgresStore.from_conn_string(pg_conn_string, index=config) as broken:
+            svc = MemoryService(StorageAdapter(broken))
+            with pytest.raises(RuntimeError, match="embedding provider unavailable"):
+                await svc.update("project", "proj-42", mid, content="will fail")
+        stored = await _store_value(pg_conn_string, mid)
+        assert stored["content"] == "The billing service uses event sourcing."
+
+    async def test_other_users_memory_updatable(self, service: MemoryService) -> None:
+        mid = await self._saved(service, user_id="bob")
+        await service.update("project", "proj-42", mid, title="edited by someone else")
+        got = await service.get_by_id("project", "proj-42", mid)
+        assert got["title"] == "edited by someone else"
+        assert got["user_id"] == "bob"
+
+
+# ---------------------------------------------------------------------------
 # search() — REC-4 (E2.2), LLD §2.2 anchor LLD-e2-service-search
 # ---------------------------------------------------------------------------
 

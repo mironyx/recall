@@ -16,7 +16,7 @@ class MemoryRecord(BaseModel):
 
     scope: str  # "project" | "global"
     project_id: str  # project ID or "_" for global
-    user_id: str  # who created/last updated
+    user_id: str  # author (creator)
     kind: str  # free-form: decision, convention, etc.
     title: str  # short title
     content: str  # full content

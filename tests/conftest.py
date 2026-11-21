@@ -158,8 +158,16 @@ async def _store_session(pg_conn_string: str, _migrated_db_sess: None) -> AsyncI
     yield
 
 
+@pytest.fixture
+def embed_calls() -> list[list[str]]:
+    """Texts passed to each embedding call made through the ``store`` fixture."""
+    return []
+
+
 @pytest_asyncio.fixture
-async def store(pg_conn_string: str, _store_session: None) -> AsyncIterator[object]:
+async def store(
+    pg_conn_string: str, _store_session: None, embed_calls: list[list[str]]
+) -> AsyncIterator[object]:
     """Per-test store fixture. TRUNCATEs data tables, yields an AsyncPostgresStore
     backed by the StubEmbeddingsProvider (ADR-0008)."""
     from collections.abc import Sequence
@@ -182,6 +190,7 @@ async def store(pg_conn_string: str, _store_session: None) -> AsyncIterator[obje
     stub = StubEmbeddingsProvider(dim=dims)
 
     def _embed(texts: Sequence[str]) -> list[list[float]]:
+        embed_calls.append(list(texts))
         return stub.embed(list(texts))
 
     config = PostgresIndexConfig(dims=stub.dim, embed=_embed)
@@ -190,15 +199,31 @@ async def store(pg_conn_string: str, _store_session: None) -> AsyncIterator[obje
 
 
 class _CountingStore:
-    """Decorator over a real AsyncPostgresStore that counts ``asearch`` calls.
+    """Decorator over a real AsyncPostgresStore that counts calls.
 
     Not a subclass and not a mock: every call is forwarded to the real store
-    (ADR-0012); the only addition is the ``asearch_calls`` counter.
+    (ADR-0012); the only additions are the ``asearch_calls``, ``aget_calls``,
+    ``aput_calls`` and ``adelete_calls`` counters.
     """
 
     def __init__(self, inner: object) -> None:
         self._inner = inner
         self.asearch_calls = 0
+        self.aget_calls = 0
+        self.aput_calls = 0
+        self.adelete_calls = 0
+
+    async def aget(self, *args: object, **kwargs: object) -> object:
+        self.aget_calls += 1
+        return await self._inner.aget(*args, **kwargs)  # type: ignore[attr-defined]
+
+    async def aput(self, *args: object, **kwargs: object) -> object:
+        self.aput_calls += 1
+        return await self._inner.aput(*args, **kwargs)  # type: ignore[attr-defined]
+
+    async def adelete(self, *args: object, **kwargs: object) -> object:
+        self.adelete_calls += 1
+        return await self._inner.adelete(*args, **kwargs)  # type: ignore[attr-defined]
 
     async def asearch(self, *args: object, **kwargs: object) -> object:
         self.asearch_calls += 1
