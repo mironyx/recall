@@ -9,8 +9,10 @@ entries:
   - req: REQ-story-14-update-a-memory
     lld: v2/lld-e3-update-delete-errors.md#LLD-e3-service-update
     issue: REC-9
-    files: []
-    status: Approved
+    files:
+      - src/recall/memory_service.py
+      - src/recall/models.py
+    status: Implemented
     lld_revision: r1
     # Also satisfied by §3.2 (#LLD-e3-update-tool): the memory_update tool.
 
