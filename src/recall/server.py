@@ -37,6 +37,7 @@ from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from recall.auth import AuthConfig, authenticate, load_auth_config
+from recall.config import SearchConfig, load_search_config
 from recall.embeddings.provider import validate_dim
 from recall.embeddings.stub import StubEmbeddingsProvider
 from recall.errors import UnauthenticatedError
@@ -109,6 +110,43 @@ MEMORY_GET_SCHEMA: dict[str, Any] = {
         "id": {"type": "string"},
     },
     "required": ["scope", "project_id", "id"],
+}
+
+MEMORY_SEARCH_DESCRIPTION = (
+    "Semantic search over stored memories. Call this at the start of a task, "
+    "and whenever you need prior decisions, conventions, gotchas or "
+    "instructions, BEFORE re-deriving them or asking the user.\n\n"
+    "By default it searches the project's memories AND global memories "
+    "together and returns one ranked list (project hits get a small boost). "
+    "Pass scope to restrict to one of them. To load standing guidance, use "
+    "kind='instruction'.\n\n"
+    "Returns a list of results: id, scope, project_id, kind, title, snippet, "
+    "score. Snippets are truncated — call memory_get with the id for the "
+    "full content. An empty list is normal (nothing relevant stored yet), "
+    "not an error.\n\n"
+    "Parameters:\n"
+    "- project_id (string, required): the project identifier\n"
+    "- query (string, required): natural-language search text, 1-2000 characters\n"
+    "- kind (string, optional): only memories of this kind, e.g. "
+    "'decision', 'convention', 'gotcha', 'instruction'\n"
+    "- scope (string, optional): 'project' or 'global'; omit to search both\n"
+    "- user_id (string, optional): only memories authored by this user; "
+    "this filters by author, it is not your identity\n"
+    "- limit (integer, optional): maximum results; the server applies a "
+    "default and a cap"
+)
+
+MEMORY_SEARCH_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "project_id": {"type": "string"},
+        "query": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "kind": {"type": "string"},
+        "scope": {"type": "string", "enum": ["project", "global"]},
+        "user_id": {"type": "string"},
+        "limit": {"type": "integer", "minimum": 1},
+    },
+    "required": ["project_id", "query"],
 }
 
 
@@ -282,6 +320,11 @@ async def _list_tools(
                 description=MEMORY_GET_DESCRIPTION,
                 input_schema=MEMORY_GET_SCHEMA,
             ),
+            Tool(
+                name="memory_search",
+                description=MEMORY_SEARCH_DESCRIPTION,
+                input_schema=MEMORY_SEARCH_SCHEMA,
+            ),
         ]
     )
 
@@ -291,6 +334,7 @@ def _build_lifespan(
     auth_config: AuthConfig,
     mcp_runtime: _McpRuntime,
     mcp_server: Server,
+    search_config: SearchConfig,
 ) -> Callable[[Starlette], AbstractAsyncContextManager[None, bool | None]]:
     """Lifespan: open the store pool, wire the router, run the dispatcher.
 
@@ -306,7 +350,9 @@ def _build_lifespan(
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         async with store as store_instance:
-            mcp_runtime.router = ToolRouter(MemoryService(StorageAdapter(store_instance)))
+            mcp_runtime.router = ToolRouter(
+                MemoryService(StorageAdapter(store_instance), search_config)
+            )
             async with mcp_server.session_manager.run():
                 yield
 
@@ -337,6 +383,7 @@ def create_app(conn_string: str) -> Starlette:
     handlers can reach it without module-level state.
     """
     auth_config = _load_auth_config()
+    search_config = load_search_config(os.environ)
     store = _build_store(conn_string)
     mcp_runtime = _McpRuntime()
     mcp_server = _build_mcp_server(auth_config, mcp_runtime)
@@ -362,7 +409,7 @@ def create_app(conn_string: str) -> Starlette:
             Mount("/", mcp_app),
         ],
         middleware=[Middleware(RequestContextMiddleware)],
-        lifespan=_build_lifespan(store, auth_config, mcp_runtime, mcp_server),
+        lifespan=_build_lifespan(store, auth_config, mcp_runtime, mcp_server, search_config),
     )
     app.state.conn_string = conn_string
     return app

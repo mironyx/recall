@@ -560,3 +560,42 @@ class TestRouterHardening:
         assert event["project_id"] == "p"
         assert event["kind"] == ""
         assert event["scope"] == "project"
+
+
+class TestMemorySearchValidation:
+    """REC-6 — memory_search boundary validation; failures never reach storage."""
+
+    @pytest.mark.parametrize(
+        ("overrides", "field"),
+        [
+            ({"query": ""}, "query"),
+            ({"query": None}, "query"),
+            ({"query": "x" * 2001}, "2000"),
+            ({"project_id": "Bad ID!"}, ""),
+            ({"scope": "team"}, "scope"),
+            ({"limit": "ten"}, "limit"),
+            ({"limit": True}, "limit"),
+        ],
+    )
+    async def test_invalid_params_return_validation_error(
+        self, overrides: dict[str, Any], field: str
+    ) -> None:
+        params: dict[str, Any] = {"project_id": "proj-42", "query": "billing"}
+        params.update(overrides)
+        result = await _unit_router().handle_tool_call("memory_search", params, "alice")
+        assert result["error"] == "validation_error"
+        assert field in result["hint"]
+
+    async def test_missing_query_names_query(self) -> None:
+        result = await _unit_router().handle_tool_call(
+            "memory_search", {"project_id": "proj-42"}, "alice"
+        )
+        assert result["error"] == "validation_error"
+        assert "query" in result["hint"]
+
+    async def test_query_at_limit_is_accepted(self) -> None:
+        parsed = ToolRouter._parse_search_params(
+            {"project_id": "proj-42", "query": "x" * 2000, "user_id": "bob", "limit": 3}
+        )
+        assert parsed.author_user_id == "bob"
+        assert parsed.limit == 3
