@@ -358,17 +358,6 @@ class TestToolRouterDispatch:
         assert result["error"] == "validation_error"
         assert "Unknown tool" in result["hint"]
 
-    async def test_unexpected_service_error_propagates(self) -> None:
-        """Given the service raises a non-RecallError (e.g. embedding provider
-        failure), handle_tool_call does not swallow it — only RecallError is
-        caught (LLD handle_tool_call try/except; Story 4.3 AC4 leaves server
-        errors to the transport layer)."""
-        service = MemoryService(_BoomStorage())
-        router = ToolRouter(service)
-
-        with pytest.raises(RuntimeError, match="embedding provider unavailable"):
-            await router.handle_tool_call("memory_save", _save_params(), "alice")
-
 
 # ---------------------------------------------------------------------------
 # Structured mcp_call logging (Issue #91 AC3; ADR-0011 S6.3)
@@ -500,3 +489,74 @@ class TestMemoryGetDelegation:
         assert record["title"] == "Use event sourcing"
         assert record["content"] == "The billing service uses event sourcing."
         assert record["created_at"] == record["updated_at"]
+
+
+# ---------------------------------------------------------------------------
+# Router hardening (REC-7; Story 4.3 AC4; ADR-0011)
+# ---------------------------------------------------------------------------
+
+
+class TestRouterHardening:
+    """Catch-all error generalisation and the full mcp_call field set (REC-7)."""
+
+    async def test_internal_error_is_generalised(self, captured_logs: list[dict[str, Any]]) -> None:
+        """Given an unexpected exception in a handler, the agent gets a general
+        error and no stack trace; the cause is logged server-side."""
+        router = ToolRouter(MemoryService(_BoomStorage()))
+
+        result = await router.handle_tool_call("memory_save", _save_params(), "alice")
+
+        assert result["error"] == "internal_error"
+        assert "embedding provider unavailable" not in json.dumps(result)
+        assert "Traceback" not in json.dumps(result)
+        failures = [e for e in captured_logs if e["event"] == "tool_internal_error"]
+        assert len(failures) == 1
+        assert failures[0]["log_level"] == "error"
+        assert "exc_info" in failures[0]
+
+    async def test_one_log_event_per_call(self, captured_logs: list[dict[str, Any]]) -> None:
+        """Given any call (success, domain error, unexpected error), exactly one
+        mcp_call event is emitted."""
+        boom = ToolRouter(MemoryService(_BoomStorage()))
+        await boom.handle_tool_call("memory_save", _save_params(), "alice")
+        await _unit_router().handle_tool_call("memory_get", {}, "alice")
+
+        events = [e for e in captured_logs if e["event"] == "mcp_call"]
+        assert [e["result_status"] for e in events] == ["internal_error", "validation_error"]
+
+    async def test_mcp_call_event_fields(
+        self, service: MemoryService, captured_logs: list[dict[str, Any]]
+    ) -> None:
+        """Given a save, the event carries tool, user_id, project_id, kind,
+        scope, latency_ms and result_status; request_id via context."""
+        import structlog
+
+        structlog.contextvars.bind_contextvars(request_id="req-1")
+        try:
+            await ToolRouter(service).handle_tool_call("memory_save", _save_params(), "alice")
+        finally:
+            structlog.contextvars.unbind_contextvars("request_id")
+
+        (event,) = [e for e in captured_logs if e["event"] == "mcp_call"]
+        assert event["tool"] == "memory_save"
+        assert event["user_id"] == "alice"
+        assert event["project_id"] == "proj-42"
+        assert event["kind"] == "decision"
+        assert event["scope"] == "project"
+        assert event["result_status"] == "ok"
+        assert isinstance(event["latency_ms"], (int, float))
+        assert event["request_id"] == "req-1"
+        assert "result_count" not in event
+
+    async def test_existing_tools_still_log(self, captured_logs: list[dict[str, Any]]) -> None:
+        """Given memory_get, its event keeps the E1 fields; kind is empty."""
+        await _unit_router().handle_tool_call(
+            "memory_get", {"scope": "project", "project_id": "p", "id": "x"}, "alice"
+        )
+
+        (event,) = [e for e in captured_logs if e["event"] == "mcp_call"]
+        assert event["tool"] == "memory_get"
+        assert event["result_status"] == "not_found"
+        assert event["project_id"] == "p"
+        assert event["kind"] == ""
+        assert event["scope"] == "project"

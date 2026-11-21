@@ -14,6 +14,9 @@ from recall.validation import validate_project_id_format
 
 log = structlog.get_logger()
 
+_INTERNAL_ERROR = "internal_error"
+_INTERNAL_HINT = "An unexpected error occurred. Retry; if it persists, contact the server operator."
+
 
 class ToolRouter:
     """Registers MCP tools and dispatches calls with cross-cutting concerns.
@@ -46,8 +49,9 @@ class ToolRouter:
 
         Raises:
             Nothing — errors are caught and returned as structured dicts.
-            Only RecallError is caught (Story 4.3 AC4); unexpected failures
-            propagate to the transport layer.
+            RecallError maps to its own {error, hint}; any other exception is
+            logged server-side and returned as a general internal_error with
+            no cause or stack trace (Story 4.3 AC4).
         """
         start = time.monotonic()
         try:
@@ -55,7 +59,13 @@ class ToolRouter:
         except RecallError as exc:
             self._log_call(tool_name, params, user_id, start, exc.error)
             return {"error": exc.error, "hint": exc.hint}
-        self._log_call(tool_name, params, user_id, start, "ok")
+        except Exception:
+            log.exception("tool_internal_error", tool=tool_name)
+            self._log_call(tool_name, params, user_id, start, _INTERNAL_ERROR)
+            return {"error": _INTERNAL_ERROR, "hint": _INTERNAL_HINT}
+        results = result.get("results")
+        count = len(results) if isinstance(results, list) else None
+        self._log_call(tool_name, params, user_id, start, "ok", count)
         return result
 
     @staticmethod
@@ -65,14 +75,17 @@ class ToolRouter:
         user_id: str,
         start: float,
         result_status: str,
+        result_count: int | None = None,
     ) -> None:
         """Emit the single mcp_call event for this tool call (ADR-0011).
 
-        Justification (CodeScene: excess function arguments): the five
-        arguments are exactly the five event fields; bundling them into a
-        context object would add a wrapper type for two call sites, against
+        Justification (CodeScene: excess function arguments): the six
+        arguments map one-to-one onto event fields; bundling them into a
+        context object would add a wrapper type for few call sites, against
         the project's simplicity-first rule (CLAUDE.md).
+        ``request_id`` arrives via the structlog context (RequestContextMiddleware).
         """
+        extra: dict[str, Any] = {} if result_count is None else {"result_count": result_count}
         log.info(
             "mcp_call",
             tool=tool_name,
@@ -81,7 +94,10 @@ class ToolRouter:
             # failures before scope resolution; the event stays well-formed.
             project_id=params.get("project_id", ""),
             latency_ms=round((time.monotonic() - start) * 1000, 2),
+            kind=params.get("kind", ""),
+            scope=params.get("scope", ""),
             result_status=result_status,
+            **extra,
         )
 
     async def _dispatch(
