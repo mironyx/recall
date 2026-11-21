@@ -12,9 +12,11 @@ entries:
     files:
       - src/recall/memory_service.py
       - src/recall/models.py
+      - src/recall/tool_router.py
+      - src/recall/server.py
     status: Implemented
     lld_revision: r1
-    # Also satisfied by §3.2 (#LLD-e3-update-tool): the memory_update tool.
+    # Service half: REC-9. Tool half (§3.2, #LLD-e3-update-tool): REC-10.
 
   - req: REQ-story-15-delete-a-memory
     lld: v2/lld-e3-update-delete-errors.md#LLD-e3-delete

@@ -599,3 +599,131 @@ class TestMemorySearchValidation:
         )
         assert parsed.author_user_id == "bob"
         assert parsed.limit == 3
+
+
+def _update_params(**overrides: Any) -> dict[str, Any]:
+    """Valid memory_update params (REC-10): locators plus one updatable field."""
+    params: dict[str, Any] = {
+        "scope": "project",
+        "project_id": "proj-42",
+        "id": "11111111-1111-4111-8111-111111111111",
+        "title": "New title",
+    }
+    params.update(overrides)
+    return params
+
+
+class TestMemoryUpdateValidation:
+    """REC-10 — memory_update boundary validation; failures never reach storage."""
+
+    @pytest.mark.parametrize("missing", ["scope", "project_id", "id"])
+    async def test_missing_locator_rejected(self, missing: str) -> None:
+        params = _update_params()
+        del params[missing]
+        result = await _unit_router().handle_tool_call("memory_update", params, "alice")
+        assert result["error"] == "validation_error"
+        assert missing in result["hint"]
+
+    @pytest.mark.parametrize("name", ["scope", "project_id", "id"])
+    async def test_non_string_locator_is_validation_error(self, name: str) -> None:
+        params = _update_params()
+        params[name] = 5
+        result = await _unit_router().handle_tool_call("memory_update", params, "alice")
+        assert result["error"] == "validation_error"
+        assert name in result["hint"]
+
+    async def test_empty_payload_names_the_four_fields(self) -> None:
+        params = _update_params()
+        del params["title"]
+        result = await _unit_router().handle_tool_call("memory_update", params, "alice")
+        assert result["error"] == "validation_error"
+        for name in ("title", "content", "tags", "metadata"):
+            assert name in result["hint"]
+
+    @pytest.mark.parametrize("field", ["kind", "user_id", "created_at", "updated_at"])
+    async def test_immutable_field_named_in_hint(self, field: str) -> None:
+        result = await _unit_router().handle_tool_call(
+            "memory_update", _update_params(**{field: "x"}), "alice"
+        )
+        assert result["error"] == "validation_error"
+        assert field in result["hint"]
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("title", ""),
+            ("title", 1),
+            ("content", ""),
+            ("content", ["a"]),
+            ("tags", "a"),
+            ("tags", ["a", 2]),
+            ("metadata", []),
+            ("metadata", "m"),
+        ],
+    )
+    async def test_bad_types_rejected(self, field: str, value: Any) -> None:
+        result = await _unit_router().handle_tool_call(
+            "memory_update", _update_params(**{field: value}), "alice"
+        )
+        assert result["error"] == "validation_error"
+        assert field in result["hint"]
+
+    def test_parse_keeps_empty_list_and_dict_and_maps_null_to_none(self) -> None:
+        parsed = ToolRouter._parse_update_params(
+            _update_params(title=None, content=None, tags=[], metadata={})
+        )
+        assert parsed.tags == []
+        assert parsed.metadata == {}
+        assert parsed.title is None
+        assert parsed.content is None
+        assert (parsed.scope, parsed.project_id) == ("project", "proj-42")
+        assert parsed.memory_id == "11111111-1111-4111-8111-111111111111"
+
+    async def test_unknown_id_is_not_found(self) -> None:
+        params = _update_params()
+        result = await _unit_router().handle_tool_call("memory_update", params, "alice")
+        assert result == {"error": "not_found", "hint": NotFoundError(params["id"]).hint}
+
+    async def test_handler_does_not_take_the_caller(self) -> None:
+        import inspect
+
+        sig = inspect.signature(ToolRouter._handle_memory_update)
+        assert list(sig.parameters) == ["self", "params"]
+
+    async def test_emits_single_mcp_call_event(self, captured_logs: list[dict[str, Any]]) -> None:
+        await _unit_router().handle_tool_call("memory_update", _update_params(kind="x"), "alice")
+        events = [e for e in captured_logs if e["event"] == "mcp_call"]
+        assert len(events) == 1
+        assert events[0]["tool"] == "memory_update"
+        assert events[0]["result_status"] == "validation_error"
+
+
+@pytest.mark.integration
+class TestMemoryUpdateDelegation:
+    async def test_invalid_update_issues_no_storage_call(self, counting_adapter: Any) -> None:
+        """Invariant 3 — validation errors precede storage access."""
+        router = ToolRouter(MemoryService(counting_adapter))
+        for bad in (
+            _update_params(kind="x"),
+            _update_params(title=""),
+            _update_params(tags="a"),
+            {"scope": "project", "project_id": "proj-42", "id": "x"},
+        ):
+            result = await router.handle_tool_call("memory_update", bad, "alice")
+            assert result["error"] == "validation_error"
+        assert counting_adapter.counting_store.aget_calls == 0
+        assert counting_adapter.counting_store.aput_calls == 0
+
+    async def test_update_delegates_and_returns_id(self, service: MemoryService) -> None:
+        memory_id = await service.save(**_service_save_args())
+        router = ToolRouter(service)
+        result = await router.handle_tool_call(
+            "memory_update",
+            _update_params(id=memory_id, tags=["t"], metadata={"a": 1}),
+            "bob",
+        )
+        assert result == {"id": memory_id}
+        record = await service.get_by_id("project", "proj-42", memory_id)
+        assert record["tags"] == ["t"]
+        assert record["metadata"] == {"a": 1}
+        assert record["user_id"] == "alice"
