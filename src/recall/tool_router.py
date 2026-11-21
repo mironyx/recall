@@ -28,6 +28,37 @@ class _SearchParams(NamedTuple):
     limit: int | None
 
 
+_IMMUTABLE_UPDATE_FIELDS = ("kind", "user_id", "created_at", "updated_at")
+
+
+class _UpdateParams(NamedTuple):
+    scope: str
+    project_id: str
+    memory_id: str
+    title: str | None
+    content: str | None
+    tags: list[str] | None
+    metadata: dict[str, Any] | None
+
+
+def _check_text(name: str, value: object) -> None:
+    """None = not supplied; otherwise a non-empty string is required."""
+    if value is not None and (not isinstance(value, str) or not value):
+        raise ValidationError(f"{name} must be a non-empty string")
+
+
+def _check_update_types(params: dict[str, Any]) -> None:
+    """Type-check the optional update fields (``[]``/``{}`` valid, None = absent)."""
+    _check_text("title", params.get("title"))
+    _check_text("content", params.get("content"))
+    tags = params.get("tags")
+    if tags is not None and not (isinstance(tags, list) and all(isinstance(t, str) for t in tags)):
+        raise ValidationError("tags must be a list of strings")
+    metadata = params.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        raise ValidationError("metadata must be an object")
+
+
 class ToolRouter:
     """Registers MCP tools and dispatches calls with cross-cutting concerns.
 
@@ -123,7 +154,42 @@ class ToolRouter:
             return await self._handle_memory_get(params)
         if tool_name == "memory_search":
             return await self._handle_memory_search(params)
+        if tool_name == "memory_update":
+            return await self._handle_memory_update(params)
         raise ValidationError(f"Unknown tool: {tool_name}")
+
+    async def _handle_memory_update(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Validate and delegate memory_update.
+
+        The authenticated caller is deliberately not a parameter: it must not
+        reach ``update`` (the author is immutable, Story 1.4).
+        """
+        p = self._parse_update_params(params)
+        memory_id = await self._memory_service.update(
+            p.scope, p.project_id, p.memory_id, p.title, p.content, p.tags, p.metadata
+        )
+        return {"id": memory_id}
+
+    @staticmethod
+    def _parse_update_params(params: dict[str, Any]) -> _UpdateParams:
+        """Validate memory_update params at the boundary (Story 1.4, 4.2).
+
+        ``None`` means "not supplied"; ``[]`` and ``{}`` are valid and clear
+        the field, so ``_missing_fields`` (which treats them as missing) is
+        not used for the optional fields.
+        """
+        missing = ToolRouter._missing_fields(params, ("scope", "project_id", "id"))
+        if missing:
+            raise ValidationError(f"Missing required field: {missing[0]}")
+        for name in _IMMUTABLE_UPDATE_FIELDS:
+            if name in params:
+                raise ValidationError(f"Field '{name}' is immutable and cannot be updated")
+        _check_update_types(params)
+        return _UpdateParams(
+            params["scope"], params["project_id"], params["id"],
+            params.get("title"), params.get("content"),
+            params.get("tags"), params.get("metadata"),
+        )  # fmt: skip
 
     async def _handle_memory_search(self, params: dict[str, Any]) -> dict[str, Any]:
         """Validate and delegate memory_search.

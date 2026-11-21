@@ -149,6 +149,50 @@ MEMORY_SEARCH_SCHEMA: dict[str, Any] = {
     "required": ["project_id", "query"],
 }
 
+MEMORY_UPDATE_DESCRIPTION = (
+    "Refine an existing memory in place. Use this instead of memory_save "
+    "when a memory you found via memory_search or memory_get is outdated or "
+    "incomplete: update it rather than saving a duplicate.\n\n"
+    "Send only the fields you want to change; at least one of title, "
+    "content, tags, metadata is required. tags and metadata REPLACE the "
+    "stored value (they are not merged): call memory_get first and send the "
+    "full new value; an empty list or object clears the field. Only a "
+    "content change re-embeds the memory. kind, scope, project_id, the "
+    "author and timestamps cannot be changed: to change them, save a new "
+    "memory and delete the old one.\n\n"
+    "Returns the memory id. Unknown id: not_found.\n\n"
+    "Parameters:\n"
+    '- scope (required): "project" or "global" — the memory\'s scope\n'
+    '- project_id (required): the project the memory belongs to ("_"\n'
+    "  for global)\n"
+    "- id (required): the memory ID returned by memory_save or memory_search\n"
+    "- title (optional): new non-empty title\n"
+    "- content (optional): new non-empty content\n"
+    "- tags (optional): list of strings; replaces existing tags\n"
+    "- metadata (optional): object; replaces existing metadata"
+)
+
+MEMORY_UPDATE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "scope": {"type": "string", "enum": ["project", "global"]},
+        "project_id": {"type": "string"},
+        "id": {"type": "string"},
+        "title": {"type": "string", "minLength": 1},
+        "content": {"type": "string", "minLength": 1},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "metadata": {"type": "object"},
+    },
+    "required": ["scope", "project_id", "id"],
+    # Advisory only: the router remains the single validator.
+    "anyOf": [
+        {"required": ["title"]},
+        {"required": ["content"]},
+        {"required": ["tags"]},
+        {"required": ["metadata"]},
+    ],
+}
+
 
 class RequestContextMiddleware:
     """ASGI middleware that binds request-scoped fields into the structlog context.
@@ -324,6 +368,11 @@ async def _list_tools(
                 name="memory_search",
                 description=MEMORY_SEARCH_DESCRIPTION,
                 input_schema=MEMORY_SEARCH_SCHEMA,
+            ),
+            Tool(
+                name="memory_update",
+                description=MEMORY_UPDATE_DESCRIPTION,
+                input_schema=MEMORY_UPDATE_SCHEMA,
             ),
         ]
     )
