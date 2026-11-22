@@ -19,8 +19,12 @@
       "WebFetch",
       "Bash(git checkout*)",
       "Bash(gh pr comment*)",
-      "Bash(gh issue close*)",
-      "Bash(./scripts/gh-project-status.sh*)"
+      "Bash(gh issue close*)"
+    ],
+    "deny": [
+      "Bash(git commit --no-verify*)",
+      "Bash(git commit -n *)",
+      "Bash(git push --no-verify*)"
     ]
   },
   "enableAllProjectMcpServers": true,
