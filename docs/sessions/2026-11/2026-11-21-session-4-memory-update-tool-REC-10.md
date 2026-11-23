@@ -25,3 +25,63 @@
 - Evaluator: PASS, 0 adversarial tests. `scripts/run-*.sh` absent in worktree; used uv run directly.
 - CI red on main (MD058 in REC-9 session log); fixed that blank line here along with this log's own.
 - Review warn (non-str locators giving `internal_error`) fixed: locators now go through `_check_text`; test added.
+
+## Work completed
+
+- [PR #132](https://github.com/mironyx/recall/pull/132): `memory_update` MCP tool.
+- `src/recall/tool_router.py`: `_handle_memory_update`, `_parse_update_params`, `_check_text`, `_check_update_types`.
+- `src/recall/server.py`: `MEMORY_UPDATE_DESCRIPTION`/`SCHEMA` and the tool declaration.
+- Tests: `tests/test_tool_router.py` (param validation) and new `tests/test_e2e_update_delete.py` (`TestMemoryUpdateTool`), 36 added, 382 total.
+- Feature-end ran as crash recovery (original session `d30710cd-2990-46a4-9b64-164e8a5842a6`; worktree left behind).
+
+## Decisions made
+
+- Locators go through `_check_text`, so a non-string `id` gives `validation_error` rather than `internal_error` (see Concerns).
+- Missing-locator hint names only the first missing field, matching the LLD message format; flagged as unrequested by the fidelity ledger, accepted.
+
+## Review feedback addressed
+
+- [warn] `src/recall/tool_router.py:52` — non-str locators gave `internal_error`; fixed in b08d663.
+- [fidelity] LLD invariant 4 "now 5" vs 4 tools — not a defect (LLD wording); corrected in the LLD sync.
+
+## LLD Sync report
+
+### Corrections (spec was wrong)
+
+- §3.2 Invariant 4: "now 5" → 4 tools after REC-10, 5 after §3.3 (`memory_delete` lands in REC-11).
+- §3.2 Part B step 3: only `title`/`content` were type-checked → locators `scope`/`project_id`/`id` also go through `_check_text`; a non-string locator surfaced as `internal_error` (review finding).
+
+### Additions (not in spec)
+
+- Module-level helpers `_check_text`, `_check_update_types` in `tool_router.py`, keeping `_parse_update_params` under the CodeScene complexity threshold.
+
+### Omissions (in spec but not built)
+
+- None.
+
+### Confirmations (notable)
+
+- Handler takes `params` only — the caller never reaches `update` (author immutable).
+- Schema `anyOf` is advisory; the router stays the single validator.
+
+### LLD updated
+
+File: docs/design/v2/lld-e3-update-delete-errors.md §3.2 (Part A and Part B)
+Status: Draft → Revised; manifest Story 4.2 entry → `Revised`, files populated.
+
+## Cost retrospective
+
+| Bucket | Cost | Note |
+| --- | --- | --- |
+| 3c → 5 (design + tests + impl) | $0.41 | green on attempt 1 |
+| 5 → 8 (diag + evaluator + PR) | $0.34 | evaluator PASS, no adversarial tests |
+| 8 → 10 (review + fix + report) | $0.39 | one review warn fixed + markdownlint follow-up |
+| Final (Prometheus) | $0.97 | below the $1.44 checkpoint total — the crashed session's tail is missing from the query |
+
+- Drivers: a red main (MD058 in the REC-9 log) needed an extra fix commit; the review warn needed a test + fix.
+- Action: run `npx markdownlint-cli2` on session logs before pushing; the test-author should cover non-string locators for id-based tools (REC-11 `memory_delete` has the same shape).
+
+## Next steps
+
+- REC-11 `memory_delete` (wave 3) — reuse `_check_text` for its locators.
+- `update-coverage-manifest.py --verify-anchors` reports "file not found" for valid anchors (path resolution); raise against EDF.

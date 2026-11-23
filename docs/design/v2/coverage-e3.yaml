@@ -37,7 +37,9 @@ entries:
   - req: REQ-story-42-agent-oriented-tool-descriptions
     lld: v2/lld-e3-update-delete-errors.md#LLD-e3-update-tool
     issue: REC-10
-    files: []
-    status: Approved
+    files:
+      - src/recall/server.py
+      - src/recall/tool_router.py
+    status: Revised
     lld_revision: r1
     # Partial: descriptions for memory_update and memory_delete (§3.3, #LLD-e3-delete).

@@ -10,10 +10,11 @@
 | Task issues | REC-9 (§3.1), REC-10 (§3.2), REC-11 (§3.3), REC-12 (§3.4), REC-13 (§3.5) |
 | HLD components | Memory Service, Tool Router, Embedder (composition root) |
 | ADRs | 0001 (flat schema), 0002 (namespace), 0008 (embeddings provider), 0011 (observability), 0012 (real Postgres), 0014 (no project registry), 0015 (scope-explicit IDs) |
-| Status | Draft |
+| Status | Revised |
 | Parent | [v2-design.md](../v2-design.md) |
 | Requirements | Stories 1.4, 1.5, 4.2 (update/delete descriptions), 4.3 — [requirements v0.4](../../requirements/v2-requirements.md) |
 | Plan | [Phase 3](../../plans/2026-04-12-v2-implementation-plan.md) (E3.1 update, E3.2 delete, E3.3 errors) |
+| Revised | 2026-11-23 — REC-10: §3.2 |
 
 ## Decisions taken at the architect gate (2026-11-21)
 
@@ -133,7 +134,7 @@ another namespace is `not_found`. `kind`, `user_id`, `created_at` and `updated_a
 | 1 | The authenticated caller never reaches `update`, so authorship cannot be rewritten | `test_update_does_not_change_author` (alice saves, bob updates, `user_id` still alice) |
 | 2 | Immutable fields in the payload are rejected, naming the field | `test_immutable_field_rejected[kind,user_id,created_at,updated_at]` |
 | 3 | Validation errors precede storage access | `test_invalid_update_issues_no_storage_call` (`counting_adapter.aget_calls == 0`) |
-| 4 | Tool count stays ≤ 6 (now 5) | `TestToolBudget.test_at_most_six_tools` (existing) |
+| 4 | Tool count stays ≤ 6 (4 after this task, 5 after §3.3) | `TestToolBudget.test_at_most_six_tools` (existing) |
 
 ### Acceptance criteria
 
@@ -437,10 +438,15 @@ async def _handle_memory_update(self, params: dict[str, Any]) -> dict[str, Any]
 def _parse_update_params(params: dict[str, Any]) -> _UpdateParams
     # 1. _missing_fields(params, ("scope", "project_id", "id")) -> ValidationError("Missing required field: ...")
     # 2. any key in _IMMUTABLE_UPDATE_FIELDS present -> ValidationError(f"Field '{f}' is immutable and cannot be updated")
-    # 3. keys present with a non-None value are type-checked (None = not supplied):
-    #    title/content non-empty str; tags list[str] ([] allowed); metadata dict ({} allowed) -> ValidationError(f"{name} must be ...")
-    #    do NOT use _missing_fields for these: it treats [] and {} as missing
+    # 3. _check_update_types(params): keys with a non-None value are type-checked (None = not supplied):
+    #    scope/project_id/id/title/content non-empty str; tags list[str] ([] allowed); metadata dict ({} allowed)
+    #    -> ValidationError(f"{name} must be ...")
+    #    do NOT use _missing_fields for the optional fields: it treats [] and {} as missing
     # No scope/project pairing check here: StorageAdapter._build_namespace raises (same as memory_get).
+
+# module-level helpers (keep _parse_update_params under the complexity threshold)
+def _check_text(name: str, value: object) -> None          # None passes; else non-empty str
+def _check_update_types(params: dict[str, Any]) -> None
 ```
 
 > **Constraint:** the handler stays thin (≤ 15 lines: parse, delegate, return, as `_handle_memory_search`). The handler takes `params` only (no `user_id`): the caller must not reach `update`,
@@ -455,6 +461,8 @@ def _parse_update_params(params: dict[str, Any]) -> _UpdateParams
 > parameter list with types; `project_id` is `"_"` for global memories (as `MEMORY_GET_DESCRIPTION` says). Schema adds
 > `"anyOf": [{"required": ["title"]}, {"required": ["content"]}, {"required": ["tags"]}, {"required": ["metadata"]}]`
 > (advisory only: the router remains the single validator).
+
+The router type-checks the locators too. `_missing_fields` only checks presence, so a non-string locator (e.g. `"id": 42`) would reach the store and surface as `internal_error`; `_check_text` turns it into a `validation_error` naming the field.
 
 <a id="LLD-e3-delete"></a>
 
