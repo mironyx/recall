@@ -14,7 +14,7 @@
 | Parent | [v2-design.md](../v2-design.md) |
 | Requirements | Stories 1.4, 1.5, 4.2 (update/delete descriptions), 4.3 — [requirements v0.4](../../requirements/v2-requirements.md) |
 | Plan | [Phase 3](../../plans/2026-04-12-v2-implementation-plan.md) (E3.1 update, E3.2 delete, E3.3 errors) |
-| Revised | 2026-11-23 — REC-10: §3.2; REC-11: §3.3 |
+| Revised | 2026-11-23 — REC-10: §3.2; REC-11: §3.3; REC-13: §3.5 |
 
 ## Decisions taken at the architect gate (2026-11-21)
 
@@ -571,7 +571,8 @@ async def test_every_listed_tool_has_both_cases(mcp_client) -> None:
     # names = {t.name for t in await mcp_client.list_tools()}; assert names == set(TOOL_CASES)
 ```
 
-> Tests only. Reuses `mcp_client` (`tests/conftest.py`) and `_save` from `tests/test_e2e_search.py` (import it, as that file imports its own helpers).
+> Tests only. Reuses `mcp_client` and `_PerCallClient` (`tests/conftest.py`); `_save` is local to the file,
+> as in the other e2e files. `test_error_path` also asserts a non-empty `hint` (wire shape `{error, hint}`, D5).
 > Depends on T3 for all five tools to exist. Touches no file that T4 edits.
 
 ## kb/ additions
