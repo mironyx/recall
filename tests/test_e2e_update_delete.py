@@ -1,10 +1,10 @@
-"""End-to-end tests for memory_update over real MCP transport (REC-10, E3.1b).
+"""End-to-end tests for memory_update and memory_delete over real MCP transport.
 
-Contract sources: issue REC-10 BDD specs; ``docs/design/v2/lld-e3-update-delete-errors.md``
-§3.2; requirements Stories 1.3, 1.4, 4.2, 4.3, 5.1. Real Postgres via
-testcontainers (ADR-0012); the stub embedder makes identical text score
-identically and unrelated text lower. ``TestMemoryDeleteTool`` (§3.3) extends
-this file later.
+Contract sources: issues REC-10 (E3.1b) and REC-11 (E3.2) BDD specs;
+``docs/design/v2/lld-e3-update-delete-errors.md`` §3.2 and §3.3; requirements
+Stories 1.3, 1.4, 1.5, 4.2, 4.3, 5.1. Real Postgres via testcontainers
+(ADR-0012); the stub embedder makes identical text score identically and
+unrelated text lower.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import uuid
 from collections.abc import MutableMapping
 from typing import Any
 
+import psycopg
 import pytest
 
 from tests.conftest import BOB_HEADERS, _PerCallClient
@@ -244,3 +245,208 @@ class TestMemoryUpdateToolListing:
         desc = (tool.description or "").lower()
         for phrase in ("memory_save", "replace", "embed", "kind", "project_id", '"_"', "delete"):
             assert phrase in desc, phrase
+
+
+# ---------------------------------------------------------------------------
+# memory_delete — REC-11 (E3.2), LLD §3.3 anchor LLD-e3-delete
+# ---------------------------------------------------------------------------
+
+
+def _del(memory_id: str, **overrides: Any) -> dict[str, Any]:
+    return {"scope": "project", "project_id": PROJECT, "id": memory_id, **overrides}
+
+
+async def _vector_rows(conn_string: str, key: str) -> int:
+    """Count store_vectors rows for a key over a real connection (ADR-0012)."""
+    async with (
+        await psycopg.AsyncConnection.connect(conn_string, autocommit=True) as conn,
+        conn.cursor() as cur,
+    ):
+        await cur.execute("SELECT COUNT(*) FROM store_vectors WHERE key = %s", (key,))
+        row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+
+@pytest.mark.integration
+class TestMemoryDeleteTool:
+    async def test_deleted_memory_absent_from_get_and_search(
+        self, mcp_client: _PerCallClient
+    ) -> None:
+        """REC-11 invariant 1 — get is not_found; search never returns the id."""
+        text = "Ephemeral wombat cache notes to delete."
+        mid = await _save(mcp_client, content=text)
+        assert (await _search(mcp_client, text))[0]["id"] == mid
+
+        out = await mcp_client.call_tool("memory_delete", _del(mid))
+
+        assert out == {"ok": True}
+        assert (await _get(mcp_client, mid))["error"] == "not_found"
+        assert mid not in [r["id"] for r in await _search(mcp_client, text)]
+
+    async def test_global_memory_deleted_with_sentinel_project_id(
+        self, mcp_client: _PerCallClient
+    ) -> None:
+        """REC-11 — global memories are addressed with project_id '_'."""
+        mid = await _save(mcp_client, scope="global")
+
+        out = await mcp_client.call_tool(
+            "memory_delete", {"scope": "global", "project_id": "_", "id": mid}
+        )
+
+        assert out == {"ok": True}
+        got = await mcp_client.call_tool(
+            "memory_get", {"scope": "global", "project_id": "_", "id": mid}
+        )
+        assert got["error"] == "not_found"
+
+    async def test_delete_removes_embedding_row(
+        self, mcp_client: _PerCallClient, pg_conn_string: str
+    ) -> None:
+        """REC-11 invariant 2 — no store_vectors row remains for the key."""
+        mid = await _save(mcp_client)
+        assert await _vector_rows(pg_conn_string, mid) == 1
+
+        await mcp_client.call_tool("memory_delete", _del(mid))
+
+        assert await _vector_rows(pg_conn_string, mid) == 0
+
+    async def test_delete_is_idempotent(self, mcp_client: _PerCallClient) -> None:
+        """REC-11 invariant 3 — an absent id returns ok, twice in a row."""
+        mid = str(uuid.uuid4())
+
+        assert await mcp_client.call_tool("memory_delete", _del(mid)) == {"ok": True}
+        assert await mcp_client.call_tool("memory_delete", _del(mid)) == {"ok": True}
+
+    async def test_delete_existing_twice_is_ok(self, mcp_client: _PerCallClient) -> None:
+        """REC-11 Story 1.5 AC3 — re-deleting a deleted memory is not an error."""
+        mid = await _save(mcp_client)
+
+        assert await mcp_client.call_tool("memory_delete", _del(mid)) == {"ok": True}
+        assert await mcp_client.call_tool("memory_delete", _del(mid)) == {"ok": True}
+
+    async def test_delete_wrong_namespace_leaves_memory(self, mcp_client: _PerCallClient) -> None:
+        """REC-11 invariant 4 — delete in another namespace returns ok but removes nothing."""
+        mid = await _save(mcp_client)
+
+        out = await mcp_client.call_tool("memory_delete", _del(mid, project_id="other-proj"))
+        assert out == {"ok": True}
+        out = await mcp_client.call_tool(
+            "memory_delete", {"scope": "global", "project_id": "_", "id": mid}
+        )
+        assert out == {"ok": True}
+
+        assert (await _get(mcp_client, mid))["id"] == mid
+
+    @pytest.mark.parametrize(
+        ("scope", "project_id"),
+        [("global", PROJECT), ("project", "_"), ("team", PROJECT)],
+    )
+    async def test_delete_scope_invariant_enforced(
+        self, mcp_client: _PerCallClient, scope: str, project_id: str
+    ) -> None:
+        """REC-11 invariant 5 — invalid scope pairing is a validation_error; nothing removed."""
+        mid = await _save(mcp_client)
+
+        out = await mcp_client.call_tool(
+            "memory_delete", {"scope": scope, "project_id": project_id, "id": mid}
+        )
+
+        assert out["error"] == "validation_error"
+        assert out["hint"]
+        assert (await _get(mcp_client, mid))["id"] == mid
+
+    @pytest.mark.parametrize("missing", ["scope", "project_id", "id"])
+    async def test_missing_fields_rejected(self, mcp_client: _PerCallClient, missing: str) -> None:
+        """REC-11 — a missing locator field is a validation_error naming it."""
+        params = _del(str(uuid.uuid4()))
+        del params[missing]
+
+        out = await mcp_client.call_tool("memory_delete", params)
+
+        assert out["error"] == "validation_error"
+        assert missing in out["hint"]
+
+    @pytest.mark.parametrize("field", ["scope", "project_id", "id"])
+    async def test_empty_fields_rejected(self, mcp_client: _PerCallClient, field: str) -> None:
+        """REC-11 — empty strings are treated as missing (Story 1.1 AC4 convention)."""
+        out = await mcp_client.call_tool("memory_delete", _del(str(uuid.uuid4()), **{field: ""}))
+
+        assert out["error"] == "validation_error"
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("id", 123), ("id", ["x"]), ("scope", 1), ("project_id", {"p": 1})],
+    )
+    async def test_non_string_fields_rejected(
+        self, mcp_client: _PerCallClient, field: str, value: Any
+    ) -> None:
+        """REC-11 — a non-string locator is a validation_error, never internal_error."""
+        out = await mcp_client.call_tool("memory_delete", _del(str(uuid.uuid4()), **{field: value}))
+
+        assert out["error"] == "validation_error"
+
+    async def test_any_user_can_delete(self, mcp_client: _PerCallClient) -> None:
+        """REC-11 — memories are shared within a project (Story 5.2); bob deletes alice's."""
+        mid = await _save(mcp_client)
+
+        out = await mcp_client.as_user(BOB_HEADERS).call_tool("memory_delete", _del(mid))
+
+        assert out == {"ok": True}
+        assert (await _get(mcp_client, mid))["error"] == "not_found"
+
+    async def test_delete_requires_auth(
+        self, mcp_client: _PerCallClient, unauthenticated_client: _PerCallClient
+    ) -> None:
+        """REC-11 — no bearer token: unauthenticated, and the memory survives."""
+        mid = await _save(mcp_client)
+
+        out = await unauthenticated_client.call_tool("memory_delete", _del(mid))
+
+        assert out["error"] == "unauthenticated"
+        assert (await _get(mcp_client, mid))["id"] == mid
+
+    async def test_logs_one_mcp_call_per_delete(
+        self,
+        mcp_client: _PerCallClient,
+        captured_logs: list[MutableMapping[str, Any]],
+    ) -> None:
+        """REC-11 — each delete emits exactly one mcp_call event (ADR-0011)."""
+        mid = await _save(mcp_client)
+        await mcp_client.call_tool("memory_delete", _del(mid))
+        await mcp_client.call_tool("memory_delete", {"scope": "project", "project_id": PROJECT})
+
+        calls = [
+            e
+            for e in captured_logs
+            if e.get("event") == "mcp_call" and e.get("tool") == "memory_delete"
+        ]
+        assert [e["result_status"] for e in calls] == ["ok", "validation_error"]
+        assert calls[0]["project_id"] == PROJECT
+        assert calls[0]["scope"] == "project"
+        assert calls[0]["user_id"] == "alice"
+
+
+@pytest.mark.integration
+class TestMemoryDeleteToolListing:
+    async def test_schema_and_description(self, mcp_client: _PerCallClient) -> None:
+        """REC-11 Story 4.2 — declared tool: schema and agent-oriented description."""
+        tools = {t.name: t for t in await mcp_client.list_tools()}
+        assert len(tools) <= 6
+        tool = tools["memory_delete"]
+        schema = tool.input_schema
+        assert set(schema["properties"]) == {"scope", "project_id", "id"}
+        assert set(schema["required"]) == {"scope", "project_id", "id"}
+        desc = (tool.description or "").lower()
+        assert "permanent" in desc
+        assert "idempotent" in desc
+        assert '"_"' in desc
+        assert "global" in desc
+        assert "memory_update" in desc
+
+    def test_server_constants_match_listing(self) -> None:
+        """REC-11 — the description and schema are module constants in server.py."""
+        from recall.server import MEMORY_DELETE_DESCRIPTION, MEMORY_DELETE_SCHEMA
+
+        assert "permanent" in MEMORY_DELETE_DESCRIPTION.lower()
+        assert MEMORY_DELETE_SCHEMA["type"] == "object"
+        assert set(MEMORY_DELETE_SCHEMA["required"]) == {"scope", "project_id", "id"}

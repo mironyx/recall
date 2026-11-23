@@ -28,6 +28,7 @@ class _SearchParams(NamedTuple):
     limit: int | None
 
 
+_LOCATOR_FIELDS = ("scope", "project_id", "id")
 _IMMUTABLE_UPDATE_FIELDS = ("kind", "user_id", "created_at", "updated_at")
 
 
@@ -156,7 +157,19 @@ class ToolRouter:
             return await self._handle_memory_search(params)
         if tool_name == "memory_update":
             return await self._handle_memory_update(params)
+        if tool_name == "memory_delete":
+            return await self._handle_memory_delete(params)
         raise ValidationError(f"Unknown tool: {tool_name}")
+
+    async def _handle_memory_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Validate and delegate memory_delete (Story 1.5); idempotent."""
+        missing = self._missing_fields(params, _LOCATOR_FIELDS)
+        if missing:
+            raise ValidationError(f"Missing required field: {missing[0]}")
+        for name in _LOCATOR_FIELDS:
+            _check_text(name, params[name])
+        await self._memory_service.delete(params["scope"], params["project_id"], params["id"])
+        return {"ok": True}
 
     async def _handle_memory_update(self, params: dict[str, Any]) -> dict[str, Any]:
         """Validate and delegate memory_update.
@@ -178,7 +191,7 @@ class ToolRouter:
         the field, so ``_missing_fields`` (which treats them as missing) is
         not used for the optional fields.
         """
-        missing = ToolRouter._missing_fields(params, ("scope", "project_id", "id"))
+        missing = ToolRouter._missing_fields(params, _LOCATOR_FIELDS)
         if missing:
             raise ValidationError(f"Missing required field: {missing[0]}")
         for name in _IMMUTABLE_UPDATE_FIELDS:

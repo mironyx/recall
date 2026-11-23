@@ -541,3 +541,116 @@ class TestScopingFilter:
         """Given a key outside {kind, user_id}, ValidationError names it."""
         with pytest.raises(ValidationError, match="tags"):
             StorageAdapter._validate_filter_keys({"kind": "a", "tags": ["x"]})
+
+
+# ---------------------------------------------------------------------------
+# delete() — REC-11 (E3.2), LLD §3.3 anchor LLD-e3-delete
+# ---------------------------------------------------------------------------
+
+
+async def _vector_rows(conn_string: str, key: str) -> int:
+    """Count store_vectors rows for a key over a real connection (ADR-0012)."""
+    async with (
+        await psycopg.AsyncConnection.connect(conn_string, autocommit=True) as conn,
+        conn.cursor() as cur,
+    ):
+        await cur.execute("SELECT COUNT(*) FROM store_vectors WHERE key = %s", (key,))
+        row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+
+@pytest.mark.integration
+class TestStorageAdapterDelete:
+    """REC-11 — delete via _build_namespace then adelete; idempotent; namespace-exact."""
+
+    async def test_deleted_memory_absent_from_get_and_search(
+        self, store: AsyncPostgresStore
+    ) -> None:
+        """REC-11 invariant 1 — after delete, get is None and search never returns the key."""
+        adapter = StorageAdapter(store)
+        key = await _plant(adapter, "project", "proj-42", "delete me please")
+
+        assert await adapter.delete("project", "proj-42", key) is None
+
+        assert await adapter.get("project", "proj-42", key) is None
+        hits = await adapter.search("project", "proj-42", "delete me please")
+        assert key not in [h.key for h in hits]
+
+    async def test_delete_removes_embedding_row(
+        self, store: AsyncPostgresStore, pg_conn_string: str
+    ) -> None:
+        """REC-11 invariant 2 — the store_vectors row goes with the store row (FK cascade)."""
+        adapter = StorageAdapter(store)
+        key = await _plant(adapter, "project", "proj-42", "embedded content")
+        assert await _vector_rows(pg_conn_string, key) == 1
+
+        await adapter.delete("project", "proj-42", key)
+
+        assert await _vector_rows(pg_conn_string, key) == 0
+
+    async def test_delete_is_idempotent(self, store: AsyncPostgresStore) -> None:
+        """REC-11 invariant 3 — deleting an absent key twice is a no-op, never an error."""
+        adapter = StorageAdapter(store)
+        key = str(uuid.uuid4())
+
+        assert await adapter.delete("project", "proj-42", key) is None
+        assert await adapter.delete("project", "proj-42", key) is None
+
+    async def test_delete_twice_after_save(self, store: AsyncPostgresStore) -> None:
+        """REC-11 — a second delete of an already-deleted key is still a no-op."""
+        adapter = StorageAdapter(store)
+        key = await _plant(adapter, "global", GLOBAL_SENTINEL, "global text")
+
+        await adapter.delete("global", GLOBAL_SENTINEL, key)
+        await adapter.delete("global", GLOBAL_SENTINEL, key)
+
+        assert await adapter.get("global", GLOBAL_SENTINEL, key) is None
+
+    async def test_delete_wrong_namespace_leaves_memory(self, store: AsyncPostgresStore) -> None:
+        """REC-11 invariant 4 — delete in namespace A never removes the same key in B."""
+        adapter = StorageAdapter(store)
+        key = str(uuid.uuid4())
+        await adapter.put("project", "proj-a", key, _memory_value(project_id="proj-a"))
+        await adapter.put("project", "proj-b", key, _memory_value(project_id="proj-b"))
+        await adapter.put(
+            "global", GLOBAL_SENTINEL, key,
+            _memory_value(scope="global", project_id=GLOBAL_SENTINEL),
+        )  # fmt: skip
+
+        await adapter.delete("project", "proj-a", key)
+
+        assert await adapter.get("project", "proj-a", key) is None
+        assert await adapter.get("project", "proj-b", key) is not None
+        assert await adapter.get("global", GLOBAL_SENTINEL, key) is not None
+
+    async def test_delete_prefix_namespace_does_not_match(self, store: AsyncPostgresStore) -> None:
+        """REC-11 invariant 4 — 'app' must not delete the same key under 'app-v2'."""
+        adapter = StorageAdapter(store)
+        key = str(uuid.uuid4())
+        await adapter.put("project", "app-v2", key, _memory_value(project_id="app-v2"))
+
+        await adapter.delete("project", "app", key)
+
+        assert await adapter.get("project", "app-v2", key) is not None
+
+    @pytest.mark.parametrize(
+        ("scope", "project_id"),
+        [("global", "proj-42"), ("project", GLOBAL_SENTINEL), ("team", "proj-42")],
+    )
+    async def test_delete_scope_invariant_enforced(
+        self, counting_adapter: Any, scope: str, project_id: str
+    ) -> None:
+        """REC-11 invariant 5 — an invalid namespace raises ValidationError before adelete."""
+        with pytest.raises(ValidationError):
+            await counting_adapter.delete(scope, project_id, str(uuid.uuid4()))
+
+        assert counting_adapter.counting_store.adelete_calls == 0
+
+    async def test_delete_single_round_trip(self, counting_adapter: Any) -> None:
+        """REC-11 — one adelete reaches the store; no get-then-delete existence check."""
+        key = await _plant(counting_adapter, "project", "proj-42", "round trip")
+
+        await counting_adapter.delete("project", "proj-42", key)
+
+        assert counting_adapter.counting_store.adelete_calls == 1
+        assert counting_adapter.counting_store.aget_calls == 0

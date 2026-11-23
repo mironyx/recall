@@ -193,6 +193,30 @@ MEMORY_UPDATE_SCHEMA: dict[str, Any] = {
     ],
 }
 
+MEMORY_DELETE_DESCRIPTION = (
+    "Permanently delete a memory. This cannot be undone. Call it only when a "
+    "memory is wrong or obsolete; to correct or refine a memory, prefer "
+    "memory_update.\n\n"
+    "Idempotent: deleting an id that does not exist (or was already deleted) "
+    "still returns ok, so a retry is safe.\n\n"
+    'Returns {"ok": true}.\n\n'
+    "Parameters:\n"
+    '- scope (required): "project" or "global" — the memory\'s scope\n'
+    '- project_id (required): the project the memory belongs to ("_"\n'
+    "  for global)\n"
+    "- id (required): the memory ID returned by memory_save or memory_search"
+)
+
+MEMORY_DELETE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "scope": {"type": "string", "enum": ["project", "global"]},
+        "project_id": {"type": "string"},
+        "id": {"type": "string"},
+    },
+    "required": ["scope", "project_id", "id"],
+}
+
 
 class RequestContextMiddleware:
     """ASGI middleware that binds request-scoped fields into the structlog context.
@@ -373,6 +397,11 @@ async def _list_tools(
                 name="memory_update",
                 description=MEMORY_UPDATE_DESCRIPTION,
                 input_schema=MEMORY_UPDATE_SCHEMA,
+            ),
+            Tool(
+                name="memory_delete",
+                description=MEMORY_DELETE_DESCRIPTION,
+                input_schema=MEMORY_DELETE_SCHEMA,
             ),
         ]
     )

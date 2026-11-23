@@ -1,4 +1,4 @@
-"""Core memory lifecycle — save, get, search and update. Delete in a later phase."""
+"""Core memory lifecycle — save, get, search, update and delete."""
 
 from __future__ import annotations
 
@@ -215,6 +215,17 @@ class MemoryService:
             index=["content"] if content_changed else False,
         )
         return memory_id
+
+    async def delete(self, scope: str, project_id: str, memory_id: str) -> None:
+        """Permanently delete a memory (Story 1.5).
+
+        Idempotent: no existence check — an absent id is a no-op, never
+        ``NotFoundError`` (a get-then-delete would add a round trip and a race).
+
+        Raises:
+            ValidationError: scope invariant violation.
+        """
+        await self._storage.delete(scope, project_id, memory_id)
 
     @staticmethod
     def _apply_changes(
