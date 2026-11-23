@@ -38,7 +38,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from recall.auth import AuthConfig, authenticate, load_auth_config
 from recall.config import SearchConfig, load_search_config
-from recall.embeddings.provider import validate_dim
+from recall.embeddings.provider import guarded_embed, validate_dim
 from recall.embeddings.stub import StubEmbeddingsProvider
 from recall.errors import UnauthenticatedError
 from recall.health import healthz, readyz
@@ -302,7 +302,8 @@ def _load_auth_config() -> AuthConfig:
 def _build_store(
     conn_string: str,
 ) -> AbstractAsyncContextManager[AsyncPostgresStore, bool | None]:
-    """Build the AsyncPostgresStore wired to the stub embedder (ADR-0008).
+    """Build the AsyncPostgresStore wired to the stub embedder through ``guarded_embed``
+    (ADR-0008, LLD §3.4).
 
     The vector dim comes from ``RECALL_EMBEDDING_DIMS`` (schema.py default
     1536) and is fail-fast checked against the provider before the index
@@ -310,8 +311,6 @@ def _build_store(
     async context manager: the connection pool and table setup are deferred
     to the app lifespan, so an unreachable DSN does not break construction.
     """
-    from collections.abc import Sequence
-
     from langgraph.store.postgres import AsyncPostgresStore
     from langgraph.store.postgres.base import PostgresIndexConfig
 
@@ -324,12 +323,9 @@ def _build_store(
     # Deferred: catching it at startup needs schema introspection (Story 6.4).
     validate_dim(stub, dims)
 
-    def _embed(texts: Sequence[str]) -> list[list[float]]:
-        return stub.embed(list(texts))
-
     return AsyncPostgresStore.from_conn_string(
         conn_string,
-        index=PostgresIndexConfig(dims=dims, embed=_embed),
+        index=PostgresIndexConfig(dims=dims, embed=guarded_embed(stub)),
     )
 
 
