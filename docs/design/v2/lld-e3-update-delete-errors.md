@@ -14,7 +14,7 @@
 | Parent | [v2-design.md](../v2-design.md) |
 | Requirements | Stories 1.4, 1.5, 4.2 (update/delete descriptions), 4.3 — [requirements v0.4](../../requirements/v2-requirements.md) |
 | Plan | [Phase 3](../../plans/2026-04-12-v2-implementation-plan.md) (E3.1 update, E3.2 delete, E3.3 errors) |
-| Revised | 2026-11-23 — REC-10: §3.2; REC-11: §3.3; REC-13: §3.5 |
+| Revised | 2026-11-23 — REC-10: §3.2; REC-11: §3.3; REC-12: §3.4; REC-13: §3.5 |
 
 ## Decisions taken at the architect gate (2026-11-21)
 
@@ -512,7 +512,9 @@ src/recall/errors.py              — ErrorCode, EmbeddingError, subclasses use 
 src/recall/embeddings/provider.py — guarded_embed
 src/recall/server.py              — _build_store uses guarded_embed
 src/recall/tool_router.py         — _INTERNAL_ERROR -> ErrorCode.INTERNAL_ERROR
-tests/conftest.py                 — _open_store(dsn, embed) helper shared by store and failing_embedding_store
+tests/conftest.py                 — _open_store(dsn, embed, dims) shared by store and failing_embedding_store;
+                                    _RecordingProvider (store, feeds embed_calls), _FailingProvider,
+                                    FAILING_PROVIDER_DETAIL
 tests/test_errors.py              — NEW: TestErrorEnvelopes, TestGuardedEmbed, vocabulary test
 ```
 
@@ -532,8 +534,14 @@ class EmbeddingError(RecallError):
 # embeddings/provider.py
 def guarded_embed(provider: EmbeddingsProvider) -> Callable[[Sequence[str]], list[list[float]]]:
     # returns embed(texts): try provider.embed(list(texts));
-    # except Exception as exc: log.exception("embedding_failed"); raise EmbeddingError() from exc
+    # except Exception as exc:
+    #     log.exception("embedding_provider_failed", provider=type(provider).__name__)
+    #     raise EmbeddingError() from exc
 ```
+
+> **Implementation note (REC-12):** the log event cannot be named `"embedding_failed"` — that literal
+> outside `errors.py` fails the invariant-1 grep below. The wire code comes from `EmbeddingError`; the
+> log event is `embedding_provider_failed`.
 
 Invariant 1 grep (run from the repo root, must print nothing):
 
@@ -543,8 +551,9 @@ grep -rnE '"(unauthenticated|validation_error|not_found|embedding_failed|interna
 
 > **Constraints:** `RecallError.__init__(error: str, hint: str)` is unchanged; a `StrEnum` member is a
 > `str`, so `exc.error`, `json.dumps` and every existing equality test keep working. `server._build_store`
-> replaces its inline `_embed` with `guarded_embed(stub)`; `conftest._open_store` does the same so tests
-> run the production path. `failing_embedding_store` uses a test provider whose `embed` raises
+> replaces its inline `_embed` with `guarded_embed(stub)`; the `store` fixture passes
+> `guarded_embed(_RecordingProvider(stub, embed_calls))` to `conftest._open_store`, so tests run the
+> production path and `embed_calls` still records each batch. `failing_embedding_store` uses a test provider whose `embed` raises
 > `RuntimeError("secret provider detail")`; this is a provider double, not a store mock (ADR-0012), and
 > the leak test asserts that string is absent from the envelope. Retry/timeout policy belongs to
 > E4.1's real providers, not here. 
@@ -577,7 +586,7 @@ async def test_every_listed_tool_has_both_cases(mcp_client) -> None:
 
 ## kb/ additions
 
-Add to `kb/architecture.md` as part of T4:
+Added to `kb/architecture.md` by T4 (REC-12), under "Errors, embed seam, update and delete (E3)":
 
 ```markdown
 - `src/recall/errors.py` — `ErrorCode` is the single registry of wire error codes (`unauthenticated`, `validation_error`, `not_found`, `embedding_failed`, `internal_error`). Raise `RecallError` subclasses; never write a code literal elsewhere.

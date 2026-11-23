@@ -32,8 +32,12 @@ entries:
   - req: REQ-story-43-structured-error-responses
     lld: v2/lld-e3-update-delete-errors.md#LLD-e3-errors
     issue: REC-12
-    files: []
-    status: Approved
+    files:
+      - src/recall/embeddings/provider.py
+      - src/recall/errors.py
+      - src/recall/server.py
+      - src/recall/tool_router.py
+    status: Revised
     lld_revision: r1
     # Completes the vocabulary; Phase 1 codes are Implemented in coverage-e1.yaml.
     # Exit-criterion test matrix is §3.5 (#LLD-e3-tool-surface).
