@@ -14,7 +14,7 @@
 | Parent | [v2-design.md](../v2-design.md) |
 | Requirements | Stories 1.4, 1.5, 4.2 (update/delete descriptions), 4.3 — [requirements v0.4](../../requirements/v2-requirements.md) |
 | Plan | [Phase 3](../../plans/2026-04-12-v2-implementation-plan.md) (E3.1 update, E3.2 delete, E3.3 errors) |
-| Revised | 2026-11-23 — REC-10: §3.2 |
+| Revised | 2026-11-23 — REC-10: §3.2; REC-11: §3.3 |
 
 ## Decisions taken at the architect gate (2026-11-21)
 
@@ -358,6 +358,7 @@ happy and one error case per tool, and a guard that fails when a tool is listed 
 | `StubEmbeddingsProvider` | `recall.embeddings.stub` | a custom test embedder |
 | `_PerCallClient` | `tests/conftest.py` | a second transport client |
 | `_save` | `tests/test_e2e_search.py` | a second save helper |
+| `_vector_row_count` | `tests/test_memory_service.py` | a second `store_vectors` row-count helper |
 
 <a id="LLD-e3-service-update"></a>
 
@@ -474,7 +475,7 @@ src/recall/memory_service.py   — delete
 src/recall/tool_router.py      — _handle_memory_delete, dispatch entry
 src/recall/server.py           — MEMORY_DELETE_DESCRIPTION/SCHEMA, Tool declaration
 tests/test_storage_adapter.py  — TestStorageAdapterDelete
-tests/test_memory_service.py   — TestMemoryServiceDelete
+tests/test_memory_service_delete.py — TestMemoryServiceDelete
 tests/test_e2e_update_delete.py — TestMemoryDeleteTool
 ```
 
@@ -489,15 +490,16 @@ async def delete(self, scope: str, project_id: str, memory_id: str) -> None:
 
 # ToolRouter
 async def _handle_memory_delete(self, params: dict[str, Any]) -> dict[str, Any]:
-    # _missing_fields(params, ("scope", "project_id", "id")) -> ValidationError
+    # _missing_fields(params, _LOCATOR_FIELDS) -> ValidationError naming the first missing field
+    # _check_text on each locator: a non-string value is validation_error, not internal_error
     # await self._memory_service.delete(scope, project_id, id); return {"ok": True}
 ```
 
 > **Constraint:** no `get`-then-`delete`, no `NotFoundError` on delete: idempotency is the contract
 > (Story 1.5 AC3) and an existence check would add a round trip and a race. Embedding cleanup is
 > the FK cascade, not code.
-> `test_delete_removes_embedding_row` opens its own `psycopg` connection on `pg_conn_string` and counts
-> `store_vectors` rows for the key (real Postgres, ADR-0012).
+> `test_delete_removes_embedding_row` counts `store_vectors` rows for the key with `_vector_row_count`
+> on its own `psycopg` connection (real Postgres, ADR-0012).
 > **Description:** permanent removal; `project_id` is `"_"` for global memories; idempotent; call only when a memory is wrong or obsolete (prefer
 > `memory_update` to correct it); parameter list.
 

@@ -21,8 +21,12 @@ entries:
   - req: REQ-story-15-delete-a-memory
     lld: v2/lld-e3-update-delete-errors.md#LLD-e3-delete
     issue: REC-11
-    files: []
-    status: Approved
+    files:
+      - src/recall/memory_service.py
+      - src/recall/server.py
+      - src/recall/storage_adapter.py
+      - src/recall/tool_router.py
+    status: Implemented
     lld_revision: r1
 
   - req: REQ-story-43-structured-error-responses
