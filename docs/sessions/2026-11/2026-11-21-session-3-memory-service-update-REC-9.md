@@ -46,6 +46,7 @@
 No change: the spec was fully accurate. Coverage manifest entry REQ-story-14 now has `files` and `Implemented`. Story 1.4 is only half done until REC-10 lands the tool.
 
 ## Cost retrospective
+
 | Bucket | Note |
 |--------|------|
 | Total | $1.34 final; PR creation about $0.5 |
