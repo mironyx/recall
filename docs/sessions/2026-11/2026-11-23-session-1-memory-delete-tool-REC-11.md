@@ -14,6 +14,7 @@
   the tool description and schema in `server.py`.
 
 ## Cost checkpoints
+
 | Step | Timestamp | Cost (cumulative) | Tokens (cumulative) | Note |
 |------|-----------|--------------------|----------------------|------|
 | 3c | 2026-11-23T20:04:09Z | $0.74 | 2,502 in / 3,225 out | pressure: standard — ~55 src lines, 4 src files, 3 test files [models: claude-opus-5-5 $0.74, claude-haiku-5-5 $0.00] |
@@ -23,6 +24,7 @@
 | 6 | 2026-11-23T20:10:51Z | $2.68 | 13,956 in / 33,374 out | diag pass — no smells on changed lines; split service delete tests to own file (8.03→7.78 drop); sonar skipped (no MCP analysis tool); justification ok [models: claude-opus-5-5 $2.68, claude-haiku-5-5 $0.00] |
 | 6b | 2026-11-23T20:11:29Z | $3.09 | 13,970 in / 35,486 out | evaluator: PASS, 0 adversarial — brief: used as-is [models: claude-opus-5-5 $3.08, claude-haiku-5-5 $0.00] |
 | 8 | 2026-11-23T20:12:01Z | $3.25 | 13,980 in / 37,774 out | [PR #133](https://github.com/mironyx/recall/pull/133) [models: claude-opus-5-5 $3.24, claude-haiku-5-5 $0.00] |
+| 9 | 2026-11-23T20:13:46Z | $4.89 | 31,512 in / 53,546 out | review: 1 warn (dup test helper) fixed; CI mypy on tests fixed; surface review clean [models: claude-opus-5-5 $4.87, claude-haiku-5-5 $0.02] |
 
 ## Concerns & Deferred Items
 
