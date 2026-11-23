@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Sequence
+
+import structlog
+
+from recall.errors import EmbeddingError
+
+log = structlog.get_logger()
 
 
 class EmbeddingsProvider(ABC):
@@ -46,3 +53,17 @@ def validate_dim(provider: EmbeddingsProvider, configured_dim: int) -> None:
             f"EMBEDDINGS_DIM={configured_dim} does not match "
             f"{type(provider).__name__}.dim={provider.dim}"
         )
+
+
+def guarded_embed(provider: EmbeddingsProvider) -> Callable[[Sequence[str]], list[list[float]]]:
+    """Return the embed function for ``PostgresIndexConfig``: any provider exception is
+    logged with its cause and re-raised as ``EmbeddingError`` (LLD §3.4)."""
+
+    def embed(texts: Sequence[str]) -> list[list[float]]:
+        try:
+            return provider.embed(list(texts))
+        except Exception as exc:
+            log.exception("embedding_provider_failed", provider=type(provider).__name__)
+            raise EmbeddingError() from exc
+
+    return embed

@@ -7,7 +7,7 @@ from typing import Any, NamedTuple
 
 import structlog
 
-from recall.errors import RecallError, ValidationError
+from recall.errors import ErrorCode, RecallError, ValidationError
 from recall.memory_service import MemoryService
 from recall.storage_adapter import GLOBAL_SENTINEL
 from recall.validation import validate_project_id_format
@@ -15,7 +15,6 @@ from recall.validation import validate_project_id_format
 log = structlog.get_logger()
 
 _MAX_QUERY_CHARS = 2000
-_INTERNAL_ERROR = "internal_error"
 _INTERNAL_HINT = "An unexpected error occurred. Retry; if it persists, contact the server operator."
 
 
@@ -103,8 +102,8 @@ class ToolRouter:
             return {"error": exc.error, "hint": exc.hint}
         except Exception:
             log.exception("tool_internal_error", tool=tool_name)
-            self._log_call(tool_name, params, user_id, start, _INTERNAL_ERROR)
-            return {"error": _INTERNAL_ERROR, "hint": _INTERNAL_HINT}
+            self._log_call(tool_name, params, user_id, start, ErrorCode.INTERNAL_ERROR)
+            return {"error": ErrorCode.INTERNAL_ERROR, "hint": _INTERNAL_HINT}
         results = result.get("results")
         count = len(results) if isinstance(results, list) else None
         self._log_call(tool_name, params, user_id, start, "ok", count)

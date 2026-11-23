@@ -14,14 +14,25 @@ import logging
 import os
 import sys
 import uuid
-from collections.abc import AsyncIterator, Callable, Generator, Iterator, MutableMapping
+from collections.abc import (
+    AsyncIterator,
+    Callable,
+    Generator,
+    Iterator,
+    MutableMapping,
+    Sequence,
+)
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import psycopg
 import pytest
 import pytest_asyncio
 
+from recall.embeddings.provider import EmbeddingsProvider
+
 if TYPE_CHECKING:
+    from langgraph.store.postgres import AsyncPostgresStore
     from starlette.applications import Starlette
 
     # testcontainers ships without a py.typed marker; silence mypy's import-untyped check.
@@ -164,37 +175,100 @@ def embed_calls() -> list[list[str]]:
     return []
 
 
-@pytest_asyncio.fixture
-async def store(
-    pg_conn_string: str, _store_session: None, embed_calls: list[list[str]]
-) -> AsyncIterator[object]:
-    """Per-test store fixture. TRUNCATEs data tables, yields an AsyncPostgresStore
-    backed by the StubEmbeddingsProvider (ADR-0008)."""
-    from collections.abc import Sequence
+def _embedding_dims() -> int:
+    """The vector dim baked into the schema by ensure_schema.
 
+    schema.py: RECALL_EMBEDDING_DIMS, default 1536. Test embedders must match it,
+    or any index-enabled aput fails ("expected N dimensions").
+    TODO(#89): share the dim resolution with schema.py (promote _DEFAULT_DIMS to a
+    public constant or a resolve_embedding_dims() helper) — the literal 1536 here
+    can drift from schema.py's default. Deferred from PR review (PR #114);
+    failures are loud (dim mismatch at aput) so the risk is low.
+    """
+    raw_dims = os.environ.get("RECALL_EMBEDDING_DIMS")
+    return int(raw_dims) if raw_dims else 1536
+
+
+@asynccontextmanager
+async def _open_store(
+    dsn: str, embed: Callable[[Sequence[str]], list[list[float]]], dims: int
+) -> AsyncIterator[AsyncPostgresStore]:
+    """Open an AsyncPostgresStore over ``dsn`` whose index embeds through ``embed``.
+
+    Shared by ``store`` and ``failing_embedding_store`` (LLD §3.4 refactor note) so
+    both run the production wiring: ``embed`` is ``guarded_embed(provider)``.
+    """
     from langgraph.store.postgres import AsyncPostgresStore
     from langgraph.store.postgres.base import PostgresIndexConfig
 
+    config = PostgresIndexConfig(dims=dims, embed=embed)
+    async with AsyncPostgresStore.from_conn_string(dsn, index=config) as s:
+        yield s
+
+
+class _RecordingProvider(EmbeddingsProvider):
+    """Provider double over the stub that records every batch it embeds."""
+
+    def __init__(self, inner: EmbeddingsProvider, calls: list[list[str]]) -> None:
+        self._inner = inner
+        self._calls = calls
+
+    @property
+    def dim(self) -> int:
+        return self._inner.dim
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self._calls.append(list(texts))
+        return self._inner.embed(texts)
+
+
+FAILING_PROVIDER_DETAIL = "secret provider detail"
+
+
+class _FailingProvider(EmbeddingsProvider):
+    """Provider double whose ``embed`` always raises (LLD §3.4; not a store mock,
+    ADR-0012). The message must never reach an agent."""
+
+    def __init__(self, dim: int) -> None:
+        self._dim = dim
+
+    @property
+    def dim(self) -> int:
+        return self._dim
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        raise RuntimeError(FAILING_PROVIDER_DETAIL)
+
+
+@pytest_asyncio.fixture
+async def store(
+    pg_conn_string: str, _store_session: None, embed_calls: list[list[str]]
+) -> AsyncIterator[AsyncPostgresStore]:
+    """Per-test store fixture. TRUNCATEs data tables, yields an AsyncPostgresStore
+    backed by the StubEmbeddingsProvider (ADR-0008) through ``guarded_embed``
+    (the production path, LLD §3.4); each embed batch is recorded in ``embed_calls``."""
+    from recall.embeddings.provider import guarded_embed
     from recall.embeddings.stub import StubEmbeddingsProvider
 
     await _truncate_all(pg_conn_string)
-    # The store_vectors column dim is baked into the schema by ensure_schema
-    # (schema.py: RECALL_EMBEDDING_DIMS, default 1536). The stub embedder must
-    # match it, or any index-enabled aput fails ("expected N dimensions").
-    # TODO(#89): share the dim resolution with schema.py (promote _DEFAULT_DIMS
-    # to a public constant or a resolve_embedding_dims() helper) — the literal
-    # 1536 here can drift from schema.py's default. Deferred from PR review
-    # (PR #114); failures are loud (dim mismatch at aput) so the risk is low.
-    raw_dims = os.environ.get("RECALL_EMBEDDING_DIMS")
-    dims = int(raw_dims) if raw_dims else 1536
-    stub = StubEmbeddingsProvider(dim=dims)
+    dims = _embedding_dims()
+    provider = _RecordingProvider(StubEmbeddingsProvider(dim=dims), embed_calls)
+    async with _open_store(pg_conn_string, guarded_embed(provider), dims) as s:
+        yield s
 
-    def _embed(texts: Sequence[str]) -> list[list[float]]:
-        embed_calls.append(list(texts))
-        return stub.embed(list(texts))
 
-    config = PostgresIndexConfig(dims=stub.dim, embed=_embed)
-    async with AsyncPostgresStore.from_conn_string(pg_conn_string, index=config) as s:
+@pytest_asyncio.fixture
+async def failing_embedding_store(
+    pg_conn_string: str, _store_session: None
+) -> AsyncIterator[AsyncPostgresStore]:
+    """A real AsyncPostgresStore whose embedding provider raises
+    ``RuntimeError(FAILING_PROVIDER_DETAIL)``, wired through ``guarded_embed``
+    (LLD §3.4). Does not TRUNCATE: tests pair it with ``store`` to seed data
+    through a working embedder, and ``store`` owns the per-test TRUNCATE."""
+    from recall.embeddings.provider import guarded_embed
+
+    dims = _embedding_dims()
+    async with _open_store(pg_conn_string, guarded_embed(_FailingProvider(dims)), dims) as s:
         yield s
 
 

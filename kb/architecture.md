@@ -29,11 +29,18 @@ Integration tests hit real Postgres via testcontainers. Never mock the database.
 
 Deterministic test embeddings live in `src/recall/embeddings/stub.py`
 (`StubEmbeddingsProvider`), wired into the `store` fixture's index config via
-`PostgresIndexConfig(dims=..., embed=_embed)`. Reuse it for index-backed tests
-instead of re-implementing a stub embedder.
+`PostgresIndexConfig(dims=..., embed=guarded_embed(provider))` (`conftest._open_store`).
+Reuse it for index-backed tests instead of re-implementing a stub embedder.
 
 The `EmbeddingsProvider` ABC and `validate_dim(provider, configured_dim)`
 live in `src/recall/embeddings/provider.py` (ADR-0008) — the embedder contract
 every provider implements (stub now, HTTP in E4). `validate_dim` is the
 fail-fast EMBEDDINGS_DIM check; it is wired at store creation (E1.6, issue [#91](https://github.com/mironyx/recall/issues/91)).
 Reuse both when adding providers or index-backed wiring.
+
+## Errors, embed seam, update and delete (E3)
+
+- `src/recall/errors.py` — `ErrorCode` is the single registry of wire error codes (`unauthenticated`, `validation_error`, `not_found`, `embedding_failed`, `internal_error`). Raise `RecallError` subclasses; never write a code literal elsewhere.
+- `recall.embeddings.provider.guarded_embed(provider)` — the embed seam: wraps any provider exception as `EmbeddingError`. Wire every provider through it; never pass `provider.embed` to `PostgresIndexConfig` directly.
+- `StorageAdapter.delete` — namespaced delete via `_build_namespace`; the store cascades to `store_vectors`. Idempotent.
+- `MemoryService.update` — re-embeds only when `content` changes (`index=["content"]` vs `index=False`). Never call `put` with `index=None` on an existing memory.
