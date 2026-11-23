@@ -34,9 +34,7 @@ from recall.embeddings.provider import EmbeddingsProvider
 if TYPE_CHECKING:
     from langgraph.store.postgres import AsyncPostgresStore
     from starlette.applications import Starlette
-
-    # testcontainers ships without a py.typed marker; silence mypy's import-untyped check.
-    from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
+    from testcontainers.postgres import PostgresContainer
 
 # psycopg async requires a selector-based event loop on Windows.
 if sys.platform == "win32":
