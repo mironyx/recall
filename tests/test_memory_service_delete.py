@@ -39,7 +39,7 @@ class TestMemoryServiceDelete:
         text = "a memory that will be deleted"
         mid = await _save(service, content=text)
 
-        assert await service.delete("project", _PROJECT, mid) is None
+        await service.delete("project", _PROJECT, mid)
 
         with pytest.raises(NotFoundError):
             await service.get_by_id("project", _PROJECT, mid)
@@ -72,8 +72,8 @@ class TestMemoryServiceDelete:
         """REC-11 invariant 3 — an absent id deletes OK, twice in a row."""
         mid = str(uuid.uuid4())
 
-        assert await service.delete("project", _PROJECT, mid) is None
-        assert await service.delete("project", _PROJECT, mid) is None
+        await service.delete("project", _PROJECT, mid)
+        await service.delete("project", _PROJECT, mid)
 
     async def test_delete_wrong_namespace_leaves_memory(self, service: MemoryService) -> None:
         """REC-11 invariant 4 — deleting from another namespace leaves the memory."""

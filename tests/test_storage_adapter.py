@@ -29,6 +29,7 @@ from pydantic import ValidationError as PydanticValidationError
 from recall.errors import ValidationError
 from recall.models import MemoryRecord, MemoryResponse
 from recall.storage_adapter import GLOBAL_SENTINEL, StorageAdapter
+from tests.test_memory_service import _vector_row_count
 
 if TYPE_CHECKING:
     from langgraph.store.postgres import AsyncPostgresStore
@@ -548,17 +549,6 @@ class TestScopingFilter:
 # ---------------------------------------------------------------------------
 
 
-async def _vector_rows(conn_string: str, key: str) -> int:
-    """Count store_vectors rows for a key over a real connection (ADR-0012)."""
-    async with (
-        await psycopg.AsyncConnection.connect(conn_string, autocommit=True) as conn,
-        conn.cursor() as cur,
-    ):
-        await cur.execute("SELECT COUNT(*) FROM store_vectors WHERE key = %s", (key,))
-        row = await cur.fetchone()
-        return int(row[0]) if row else 0
-
-
 @pytest.mark.integration
 class TestStorageAdapterDelete:
     """REC-11 — delete via _build_namespace then adelete; idempotent; namespace-exact."""
@@ -570,7 +560,7 @@ class TestStorageAdapterDelete:
         adapter = StorageAdapter(store)
         key = await _plant(adapter, "project", "proj-42", "delete me please")
 
-        assert await adapter.delete("project", "proj-42", key) is None
+        await adapter.delete("project", "proj-42", key)
 
         assert await adapter.get("project", "proj-42", key) is None
         hits = await adapter.search("project", "proj-42", "delete me please")
@@ -582,19 +572,19 @@ class TestStorageAdapterDelete:
         """REC-11 invariant 2 — the store_vectors row goes with the store row (FK cascade)."""
         adapter = StorageAdapter(store)
         key = await _plant(adapter, "project", "proj-42", "embedded content")
-        assert await _vector_rows(pg_conn_string, key) == 1
+        assert await _vector_row_count(pg_conn_string, key, "project.proj-42") == 1
 
         await adapter.delete("project", "proj-42", key)
 
-        assert await _vector_rows(pg_conn_string, key) == 0
+        assert await _vector_row_count(pg_conn_string, key, "project.proj-42") == 0
 
     async def test_delete_is_idempotent(self, store: AsyncPostgresStore) -> None:
         """REC-11 invariant 3 — deleting an absent key twice is a no-op, never an error."""
         adapter = StorageAdapter(store)
         key = str(uuid.uuid4())
 
-        assert await adapter.delete("project", "proj-42", key) is None
-        assert await adapter.delete("project", "proj-42", key) is None
+        await adapter.delete("project", "proj-42", key)
+        await adapter.delete("project", "proj-42", key)
 
     async def test_delete_twice_after_save(self, store: AsyncPostgresStore) -> None:
         """REC-11 — a second delete of an already-deleted key is still a no-op."""

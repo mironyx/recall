@@ -13,10 +13,10 @@ import uuid
 from collections.abc import MutableMapping
 from typing import Any
 
-import psycopg
 import pytest
 
 from tests.conftest import BOB_HEADERS, _PerCallClient
+from tests.test_memory_service import _vector_row_count
 
 PROJECT = "proj-e2e"
 
@@ -256,17 +256,6 @@ def _del(memory_id: str, **overrides: Any) -> dict[str, Any]:
     return {"scope": "project", "project_id": PROJECT, "id": memory_id, **overrides}
 
 
-async def _vector_rows(conn_string: str, key: str) -> int:
-    """Count store_vectors rows for a key over a real connection (ADR-0012)."""
-    async with (
-        await psycopg.AsyncConnection.connect(conn_string, autocommit=True) as conn,
-        conn.cursor() as cur,
-    ):
-        await cur.execute("SELECT COUNT(*) FROM store_vectors WHERE key = %s", (key,))
-        row = await cur.fetchone()
-        return int(row[0]) if row else 0
-
-
 @pytest.mark.integration
 class TestMemoryDeleteTool:
     async def test_deleted_memory_absent_from_get_and_search(
@@ -304,11 +293,11 @@ class TestMemoryDeleteTool:
     ) -> None:
         """REC-11 invariant 2 — no store_vectors row remains for the key."""
         mid = await _save(mcp_client)
-        assert await _vector_rows(pg_conn_string, mid) == 1
+        assert await _vector_row_count(pg_conn_string, mid, f"project.{PROJECT}") == 1
 
         await mcp_client.call_tool("memory_delete", _del(mid))
 
-        assert await _vector_rows(pg_conn_string, mid) == 0
+        assert await _vector_row_count(pg_conn_string, mid, f"project.{PROJECT}") == 0
 
     async def test_delete_is_idempotent(self, mcp_client: _PerCallClient) -> None:
         """REC-11 invariant 3 — an absent id returns ok, twice in a row."""
