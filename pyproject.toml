@@ -76,6 +76,8 @@ ignore = [
 
 [tool.ruff.format]
 quote-style = "double"
+# ruff >= 0.17 formats code blocks in Markdown; LLD snippets are illustrative, not source.
+exclude = ["*.md"]
 
 # ---------------------------------------------------------------------------
 # mypy
