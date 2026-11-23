@@ -353,7 +353,7 @@ class TestToolRouterDispatch:
         """Given a tool name that is not registered, when handled, then
         {error: 'validation_error'} is returned naming the unknown tool
         (LLD _dispatch else-branch)."""
-        result = await _unit_router().handle_tool_call("memory_delete", _save_params(), "alice")
+        result = await _unit_router().handle_tool_call("memory_purge", _save_params(), "alice")
 
         assert result["error"] == "validation_error"
         assert "Unknown tool" in result["hint"]

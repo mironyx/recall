@@ -61,6 +61,17 @@ class StorageAdapter:
         namespace = self._build_namespace(scope, project_id)
         return await self._store.aget(namespace, key)
 
+    async def delete(self, scope: str, project_id: str, key: str) -> None:
+        """Remove a memory by namespace + key; an absent key is a no-op.
+
+        ``store_vectors`` rows go with it via the store's ON DELETE CASCADE.
+
+        Raises:
+            ValidationError: if scope/project_id invariant is violated.
+        """
+        namespace = self._build_namespace(scope, project_id)
+        await self._store.adelete(namespace, key)
+
     async def search(
         self,
         scope: str,
