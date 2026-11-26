@@ -196,6 +196,7 @@ def _parse_provider(env: Mapping[str, str], invalid: list[str]) -> ProviderName 
 
 # Justification: libpq's parse errors quote the string, so it is rejected here without echoing it.
 def _check_database_url(env: Mapping[str, str], invalid: list[str]) -> None:
+    # TODO: libpq also accepts key=value strings, which asyncpg (/readyz) rejects.
     raw = env.get("DATABASE_URL")
     if not raw:
         return

@@ -21,6 +21,8 @@
 | 5 | 2026-11-26T15:11:50Z | $2.11 | 8,850 in / 58,999 out | green on attempt 2 (590/590; mypy run directly, no pyright); audit: no known vulnerabilities; e2e: skip — no E2E tests (e2e-dir unset or empty) [models: claude-sonnet-5-5 $2.10, claude-haiku-5-5 $0.00] |
 | 6 | 2026-11-26T15:14:23Z | $2.61 | 9,604 in / 68,431 out | diag pass — CodeScene findings fixed in settings.py and test helper; remaining ones logged; SonarQube skipped (no analysis tool); 590/590 after fixes [models: claude-sonnet-5-5 $2.61, claude-haiku-5-5 $0.01] |
 | 6b | 2026-11-26T15:43:46Z | $3.86 | 18,588 in / 100,847 out | evaluator: FAIL (search vars first-only and echoed; URL fragment leak) → fixed → recheck PASS WITH WARNINGS — brief: used as relayed by lead; recheck n/a [models: claude-sonnet-5-5 $3.85, claude-haiku-5-5 $0.01] |
+| 8 | 2026-11-26T15:44:30Z | $4.06 | 18,602 in / 104,147 out | [PR #139](https://github.com/mironyx/recall/pull/139) [models: claude-sonnet-5-5 $4.05, claude-haiku-5-5 $0.01] |
+| 9 | 2026-11-26T15:46:26Z | $5.69 | 82,274 in / 145,783 out | review: 0 blockers, warnings only [models: claude-sonnet-5-5 $5.63, claude-haiku-5-5 $0.06] |
 
 ## Concerns & Deferred Items
 
@@ -52,3 +54,10 @@
 - Evaluator recheck PASS WITH WARNINGS: `describe_db_error` still quotes statement errors carrying
   a SQLSTATE (may name a role or database; not a connection error); `tool_router.py:104`
   tracebacks for runtime database failures are untested for URL parts. Neither changed.
+- PR #139 review, no blockers. Fixed: `.env.example` no longer implies `RECALL_ALLOWED_HOSTS` is
+  enforced. Deferred: key=value `DATABASE_URL` passes startup but fails `/readyz` (TODO in
+  `settings.py`); README commands (REC-19); lost tracebacks for non-SQLSTATE failures; search rules
+  mirrored from `config.py`; LLD helper list and two signatures (for lld-sync).
+- Secret hook blocked review agents from the diff file: 8 matches in test files, reported as the
+  placeholder test DSN password. Changed files scan clean. Test files only partly agent-reviewed.
+- Fix: 2 source lines — self-checked, skipped re-review.
