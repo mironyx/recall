@@ -602,15 +602,16 @@ Private helpers (≤ 20 lines each): `_require(env, names, missing) -> dict[str,
 ### CLI decomposition
 
 ```text
-_cmd_serve(args):
-    configure_logging(args.log_level); configure_telemetry()   # telemetry wiring changes in §4.6
+_cmd_serve(args, env):                                         # env = os.environ, passed from main
+    configure_logging(args.log_level or "INFO"); configure_telemetry(env)   # §4.6 adds instrument_app
     settings = _load_or_exit(load_settings, env)               # SettingsError → stderr "error: …", exit 1
     settings = _apply_flags(settings, args)                    # only flags actually given override
     if settings.migrate_on_startup: asyncio.run(ensure_schema(settings.database_url, settings.embeddings.dim))
     app = create_app(settings)                                 # any exception: log startup_failed, exit 1
     ...uvicorn.run(app, host=settings.host, port=settings.port, log_config=None)
 
-_cmd_db_migrate: db = _load_or_exit(load_db_settings); ensure_schema(db.database_url, db.embeddings_dim)
+_cmd_db_migrate(args, env): db = _load_or_exit(load_db_settings, env); ensure_schema(db.database_url, db.embeddings_dim)
+                            # §4.4 replaces both ensure_schema calls with _prepare_database
 ```
 
 `main(argv)` sets `env = os.environ` once and passes it down. The `--host/--port/--log-level`
@@ -897,7 +898,7 @@ def instrument_app(app: Starlette) -> None:  # StarletteInstrumentor.instrument_
 def get_trace_context() -> tuple[str, str]  # unchanged
 ```
 
-CLI order: `configure_logging` → `enabled = configure_telemetry(os.environ)` →
+CLI order: `configure_logging` → `enabled = configure_telemetry(env)` →
 `load_settings` → `_prepare_database` → `create_app` → `if enabled: instrument_app(app)` →
 uvicorn. `span_exporter` is a genuine behavioural dependency for tests (in-memory exporter),
 not an HTTP seam.
@@ -926,7 +927,7 @@ Paste into `kb/architecture.md` (each task adds its own line when it lands):
 ```markdown
 ## Settings and deployment (E4)
 
-- `src/recall/settings.py` — `load_settings(env)` / `load_db_settings(env)` are the only environment readers (CLI flag defaults aside). Add a variable here, to `SETTINGS_VARIABLES`, `.env.example` and `docs/operations/env-vars.md` together (`tests/test_env_docs.py` enforces it).
+- `src/recall/settings.py` — `load_settings(env)` / `load_db_settings(env)` are the only environment readers; only `cli.main` touches `os.environ` and passes it down. Add a variable here, to `SETTINGS_VARIABLES`, `.env.example` and `docs/operations/env-vars.md` together (`tests/test_env_docs.py` enforces it).
 - `recall.embeddings.factory.build_provider(cfg)` — the one place a provider is chosen. Providers make one attempt; retry and timeout policy live in `guarded_embed` and the provider's client timeout.
 - `recall.db.schema.check_vector_dim(dsn, dim)` — runs before `ensure_schema`. A dimension change means a new database; there is no re-embed path (ADR-0008 amendment 1).
 - `recall.telemetry.configure_telemetry(env)` / `instrument_app(app)` — auto-instrumentation only (ADR-0011 amendment 1). No hand-rolled spans.
