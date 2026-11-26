@@ -17,7 +17,7 @@ Namespace is `(scope, project_id)`. `scope` is `"global"` or `"project"`. The CH
 
 ## Migration strategy (ADR-0013)
 
-Schema DDL runs in-app via `ensure_schema()`, not Alembic. Migrations are idempotent SQL files under `src/recall/migrations/` applied in order. The `AsyncPostgresStore.setup()` handles LangGraph-managed tables; recall-owned DDL uses raw `psycopg.AsyncConnection`.
+Schema DDL runs in-app via `ensure_schema()`, not Alembic. There are no migration files: `ensure_schema(dsn, dims)` in `src/recall/db/schema.py` is idempotent. The `AsyncPostgresStore.setup()` handles LangGraph-managed tables; recall-owned DDL uses raw `psycopg.AsyncConnection`.
 
 ## Tool budget
 
@@ -44,3 +44,7 @@ Reuse both when adding providers or index-backed wiring.
 - `recall.embeddings.provider.guarded_embed(provider)` — the embed seam: wraps any provider exception as `EmbeddingError`. Wire every provider through it; never pass `provider.embed` to `PostgresIndexConfig` directly.
 - `StorageAdapter.delete` — namespaced delete via `_build_namespace`; the store cascades to `store_vectors`. Idempotent.
 - `MemoryService.update` — re-embeds only when `content` changes (`index=["content"]` vs `index=False`). Never call `put` with `index=None` on an existing memory.
+
+## Settings and deployment (E4)
+
+- `src/recall/settings.py` — `load_settings(env)` / `load_db_settings(env)` are the only readers of application settings; only `cli.main` touches `os.environ` and passes it down. Add a variable here, to `SETTINGS_VARIABLES` and to `.env.example` together.

@@ -12,12 +12,14 @@ Probes edge cases not covered by tests/test_cli.py, including:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
 
 import pytest
+from tests.conftest import stub_env
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -47,7 +49,9 @@ def _find_uv() -> str:
     pytest.skip("uv not found")  # raises Skipped (NoReturn)
 
 
-def _run_entry_point(*args: str, timeout: int = 10) -> subprocess.CompletedProcess[str]:
+def _run_entry_point(
+    *args: str, timeout: int = 10, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Run via the installed `recall` script entry point."""
     uv = _find_uv()
     return subprocess.run(
@@ -56,6 +60,7 @@ def _run_entry_point(*args: str, timeout: int = 10) -> subprocess.CompletedProce
         text=True,
         timeout=timeout,
         cwd=_REPO_ROOT,
+        env=None if env is None else dict(os.environ) | env,
     )
 
 
@@ -69,7 +74,9 @@ class TestEntryPointStubs:
 
     def test_serve_via_entry_point(self) -> None:
         """recall serve --dry-run via installed entry point exits 0."""
-        result = _run_entry_point("serve", "--dry-run")
+        env = stub_env("postgresql://nouser:nopass@127.0.0.1:1/nodb")
+        env["RECALL_DB_MIGRATE_ON_STARTUP"] = "false"
+        result = _run_entry_point("serve", "--dry-run", env=env)
         assert result.returncode == 0
 
     def test_db_migrate_via_entry_point(self) -> None:

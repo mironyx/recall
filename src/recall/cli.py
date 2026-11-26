@@ -5,83 +5,105 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Callable, Mapping
+from dataclasses import replace
+from typing import TYPE_CHECKING
 
-DEFAULT_HOST = "0.0.0.0"  # noqa: S104 — container deploys bind to all interfaces
-DEFAULT_PORT = 8080
+if TYPE_CHECKING:
+    from recall.settings import Settings
 
 
-def _cmd_serve(args: argparse.Namespace) -> None:
+def _cmd_serve(args: argparse.Namespace, env: Mapping[str, str]) -> None:
     """Start the Recall MCP server.
 
-    Wires logging → telemetry → optional auto-migrate → ASGI app → uvicorn.
+    Wires logging → telemetry → settings → optional auto-migrate → ASGI app → uvicorn.
     """
-    import asyncio
-
+    import psycopg
     import structlog
 
+    from recall.db.schema import describe_db_error
     from recall.logging import configure_logging
     from recall.server import create_app
+    from recall.settings import load_settings
     from recall.telemetry import configure_telemetry
 
-    configure_logging(args.log_level)
-    configure_telemetry()
+    configure_logging(args.log_level or "INFO")
+    configure_telemetry(env)
+    settings = _apply_flags(_load_or_exit(load_settings, env), args)
+    configure_logging(settings.log_level)
 
     log = structlog.get_logger(__name__)
-    conn_string = os.environ.get("DATABASE_URL", "")
-    if not conn_string:
-        log.warning(
-            "database_url_unset",
-            message="DATABASE_URL is not set; /readyz will return 503 until it is.",
-        )
-    elif _migrate_on_startup():
-        from recall.db.schema import ensure_schema
+    if settings.migrate_on_startup:
+        _migrate_or_exit(settings.database_url, settings.embeddings.dim)
 
-        try:
-            asyncio.run(ensure_schema(conn_string))
-        except Exception:
-            log.exception("schema_setup_failed")
-            sys.exit(1)
+    try:
+        app = create_app(settings)
+    except Exception as exc:
+        detail = describe_db_error(exc) if isinstance(exc, psycopg.Error) else str(exc)
+        log.error("startup_failed", error_type=type(exc).__name__, error=detail)
+        sys.exit(1)
 
-    app = create_app(conn_string)
-
-    if getattr(args, "dry_run", False):
+    if args.dry_run:
         return
 
     import uvicorn
 
-    uvicorn.run(app, host=args.host, port=args.port, log_config=None)
+    uvicorn.run(app, host=settings.host, port=settings.port, log_config=None)
 
 
-_FALSY_ENV_VALUES = frozenset({"0", "false", "no", "off", ""})
+# Justification: shared by `serve` and `db migrate` so both report settings errors alike.
+def _load_or_exit[T](load: Callable[[Mapping[str, str]], T], env: Mapping[str, str]) -> T:
+    """Run a settings loader; on ``SettingsError`` print it and exit 1."""
+    from recall.settings import SettingsError
 
-
-def _migrate_on_startup() -> bool:
-    """Whether ``recall serve`` should run ``ensure_schema`` on startup."""
-    value = os.environ.get("RECALL_DB_MIGRATE_ON_STARTUP", "true").strip().lower()
-    return value not in _FALSY_ENV_VALUES
-
-
-def _require_database_url() -> str:
-    """Read ``DATABASE_URL`` from env or exit non-zero."""
-    conn_string = os.environ.get("DATABASE_URL")
-    if not conn_string:
-        print("error: DATABASE_URL is not set", file=sys.stderr)
+    try:
+        return load(env)
+    except SettingsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)
-    return conn_string
 
 
-def _cmd_db_migrate(_args: argparse.Namespace) -> None:
+# Justification: flag precedence is a pure step, separate from startup wiring.
+def _apply_flags(settings: Settings, args: argparse.Namespace) -> Settings:
+    """Override settings with the flags actually given on the command line."""
+    given = {
+        name: value
+        for name in ("host", "port", "log_level")
+        if (value := getattr(args, name)) is not None
+    }
+    return replace(settings, **given)
+
+
+# Justification: isolates the auto-migrate failure path (complexity gate).
+def _migrate_or_exit(database_url: str, dims: int) -> None:
+    """Auto-migrate for ``serve``; log and exit 1 on failure."""
+    import asyncio
+
+    import structlog
+
+    from recall.db.schema import describe_db_error, ensure_schema
+
+    try:
+        asyncio.run(ensure_schema(database_url, dims))
+    except Exception as exc:
+        structlog.get_logger(__name__).error("schema_setup_failed", error=describe_db_error(exc))
+        sys.exit(1)
+
+
+def _cmd_db_migrate(env: Mapping[str, str]) -> None:
     """Run idempotent schema setup and report."""
-    conn_string = _require_database_url()
+    from recall.settings import load_db_settings
+
+    db = _load_or_exit(load_db_settings, env)
 
     import asyncio
 
-    from recall.db.schema import ensure_schema
+    from recall.db.schema import describe_db_error, ensure_schema
 
     try:
-        asyncio.run(ensure_schema(conn_string))
+        asyncio.run(ensure_schema(db.database_url, db.embeddings_dim))
     except Exception as exc:
-        print(f"error: schema setup failed: {exc}", file=sys.stderr)
+        print(f"error: schema setup failed: {describe_db_error(exc)}", file=sys.stderr)
         sys.exit(1)
     print("Schema is up to date")
 
@@ -92,22 +114,9 @@ def _build_parser() -> tuple[argparse.ArgumentParser, argparse.ArgumentParser]:
     sub = parser.add_subparsers(dest="command")
 
     serve_parser = sub.add_parser("serve", help="Start the MCP server")
-    serve_parser.add_argument(
-        "--host",
-        default=os.environ.get("RECALL_HOST", DEFAULT_HOST),
-        help="bind host (default: RECALL_HOST or 0.0.0.0)",
-    )
-    serve_parser.add_argument(
-        "--port",
-        type=int,
-        default=int(os.environ.get("RECALL_PORT", DEFAULT_PORT)),
-        help="bind port (default: RECALL_PORT or 8080)",
-    )
-    serve_parser.add_argument(
-        "--log-level",
-        default=os.environ.get("LOG_LEVEL", "INFO"),
-        help="log level (default: LOG_LEVEL or INFO)",
-    )
+    serve_parser.add_argument("--host", help="bind host (default: RECALL_HOST or 0.0.0.0)")
+    serve_parser.add_argument("--port", type=int, help="bind port (default: RECALL_PORT or 8080)")
+    serve_parser.add_argument("--log-level", help="log level (default: LOG_LEVEL or INFO)")
     serve_parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -125,12 +134,13 @@ def main(argv: list[str] | None = None) -> None:
     """CLI entry point."""
     parser, db_parser = _build_parser()
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+    env = os.environ  # the one read of the process environment (LLD I1)
 
     if args.command == "serve":
-        _cmd_serve(args)
+        _cmd_serve(args, env)
     elif args.command == "db":
         if getattr(args, "db_command", None) == "migrate":
-            _cmd_db_migrate(args)
+            _cmd_db_migrate(env)
         else:
             db_parser.print_help()
     else:

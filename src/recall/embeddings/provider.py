@@ -38,7 +38,7 @@ class EmbeddingsProvider(ABC):
         ...
 
 
-# Called at store creation with the dim from RECALL_EMBEDDING_DIMS, before
+# Called at store creation with the dim from EMBEDDINGS_DIM, before
 # PostgresIndexConfig is built (E1.6, issue #91 — see server._build_store).
 def validate_dim(provider: EmbeddingsProvider, configured_dim: int) -> None:
     """Fail-fast check that the configured dim matches the provider's dim.

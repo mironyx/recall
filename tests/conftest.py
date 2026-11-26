@@ -23,13 +23,16 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import psycopg
 import pytest
 import pytest_asyncio
 
+from recall.config import SearchConfig
 from recall.embeddings.provider import EmbeddingsProvider
+from recall.settings import EmbeddingsSettings, Settings
 
 if TYPE_CHECKING:
     from langgraph.store.postgres import AsyncPostgresStore
@@ -42,6 +45,8 @@ if sys.platform == "win32":
 
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+
+_EMPTY_AUTH_FILE = Path(__file__).parent / "fixtures" / "empty-auth.json"
 
 # ---------------------------------------------------------------------------
 # Postgres container — real DB per ADR-0012
@@ -120,7 +125,7 @@ async def migrated_db(pg_conn: str) -> str:
     """A connection string for a database with ensure_schema already applied."""
     from recall.db.schema import ensure_schema
 
-    await ensure_schema(pg_conn)
+    await ensure_schema(pg_conn, _embedding_dims())
     return pg_conn
 
 
@@ -158,7 +163,7 @@ async def _migrated_db_sess(pg_conn_string: str) -> None:
     """Run ``ensure_schema`` once per test session (E0.5 contract)."""
     from recall.db.schema import ensure_schema
 
-    await ensure_schema(pg_conn_string)
+    await ensure_schema(pg_conn_string, _embedding_dims())
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -174,17 +179,40 @@ def embed_calls() -> list[list[str]]:
 
 
 def _embedding_dims() -> int:
-    """The vector dim baked into the schema by ensure_schema.
+    """The test suite's vector dim: ``EMBEDDINGS_DIM``, default 1536.
 
-    schema.py: RECALL_EMBEDDING_DIMS, default 1536. Test embedders must match it,
-    or any index-enabled aput fails ("expected N dimensions").
-    TODO(#89): share the dim resolution with schema.py (promote _DEFAULT_DIMS to a
-    public constant or a resolve_embedding_dims() helper) — the literal 1536 here
-    can drift from schema.py's default. Deferred from PR review (PR #114);
-    failures are loud (dim mismatch at aput) so the risk is low.
+    Schema setup, test embedders and ``make_settings`` all read it from here.
     """
-    raw_dims = os.environ.get("RECALL_EMBEDDING_DIMS")
+    raw_dims = os.environ.get("EMBEDDINGS_DIM")
     return int(raw_dims) if raw_dims else 1536
+
+
+def make_settings(
+    database_url: str,
+    *,
+    auth_file: str | Path | None = None,
+    dim: int | None = None,
+) -> Settings:
+    """Stub-provider ``Settings`` for tests. ``auth_file`` defaults to an empty token map."""
+    return Settings(
+        database_url=database_url,
+        auth_file=str(auth_file or _EMPTY_AUTH_FILE),
+        embeddings=EmbeddingsSettings(
+            provider="stub", dim=_embedding_dims() if dim is None else dim
+        ),
+        search=SearchConfig(),
+    )
+
+
+def stub_env(database_url: str) -> dict[str, str]:
+    """A minimal subprocess environment that ``recall serve`` accepts."""
+    return {
+        "PATH": os.environ.get("PATH", ""),
+        "DATABASE_URL": database_url,
+        "RECALL_AUTH_FILE": str(_EMPTY_AUTH_FILE),
+        "EMBEDDINGS_PROVIDER": "stub",
+        "EMBEDDINGS_DIM": str(_embedding_dims()),
+    }
 
 
 @asynccontextmanager
@@ -411,14 +439,13 @@ def app_factory(
     pg_conn_string: str,
     _migrated_db_sess: None,
     tmp_path_factory: pytest.TempPathFactory,
-) -> Iterator[Callable[[], Starlette]]:
+) -> Callable[[], Starlette]:
     """Factory of Starlette apps (lifespan NOT entered) over the test Postgres.
 
     ``create_app``'s store is single-use, so each lifespan entry needs a fresh
-    app. ``RECALL_AUTH_FILE`` maps ``test-token`` to alice and ``bob-token`` to
-    bob (Story 5.6); embedding dim env vars are cleared so the server default
-    matches the schema default 1536. The lifespan is entered per client inside
-    the test's own task (anyio task groups cannot cross fixture tasks).
+    app. The auth file maps ``test-token`` to alice and ``bob-token`` to bob
+    (Story 5.6). The lifespan is entered per client inside the test's own task
+    (anyio task groups cannot cross fixture tasks).
     """
     from recall.server import create_app
 
@@ -426,19 +453,8 @@ def app_factory(
     auth_file.write_text(
         json.dumps({"test-token": {"user_id": "alice"}, "bob-token": {"user_id": "bob"}})
     )
-    names = ("RECALL_AUTH_FILE", "RECALL_EMBEDDING_DIMS", "RECALL_EMBEDDINGS_DIM")
-    saved_env = {var: os.environ.get(var) for var in names}
-    try:
-        os.environ["RECALL_AUTH_FILE"] = str(auth_file)
-        for var in names[1:]:
-            os.environ.pop(var, None)
-        yield lambda: create_app(pg_conn_string)
-    finally:
-        for var, value in saved_env.items():
-            if value is None:
-                os.environ.pop(var, None)
-            else:
-                os.environ[var] = value
+    settings = make_settings(pg_conn_string, auth_file=auth_file)
+    return lambda: create_app(settings)
 
 
 @pytest.fixture

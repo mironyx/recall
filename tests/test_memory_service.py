@@ -27,7 +27,6 @@ Design notes:
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -43,6 +42,7 @@ from recall.errors import NotFoundError, ValidationError
 from recall.memory_service import MemoryService
 from recall.models import MemoryResponse, SearchResult
 from recall.storage_adapter import GLOBAL_SENTINEL, StorageAdapter
+from tests.conftest import _embedding_dims
 
 if TYPE_CHECKING:
     from langgraph.store.postgres import AsyncPostgresStore
@@ -279,8 +279,7 @@ class TestMemoryServiceSave:
         # The match pins propagation of the provider's error, keeping this
         # test red against the NotImplementedError stub (which is itself a
         # RuntimeError subclass).
-        raw_dims = os.environ.get("RECALL_EMBEDDING_DIMS")
-        dims = int(raw_dims) if raw_dims else 1536
+        dims = _embedding_dims()
         config = PostgresIndexConfig(dims=dims, embed=_raise)
         async with AsyncPostgresStore.from_conn_string(
             pg_conn_string, index=config
@@ -458,8 +457,7 @@ class TestMemoryServiceUpdate:
         def _raise(texts: Sequence[str]) -> list[list[float]]:
             raise RuntimeError("embedding provider unavailable")
 
-        raw_dims = os.environ.get("RECALL_EMBEDDING_DIMS")
-        config = PostgresIndexConfig(dims=int(raw_dims) if raw_dims else 1536, embed=_raise)
+        config = PostgresIndexConfig(dims=_embedding_dims(), embed=_raise)
         async with AsyncPostgresStore.from_conn_string(pg_conn_string, index=config) as broken:
             svc = MemoryService(StorageAdapter(broken))
             with pytest.raises(RuntimeError, match="embedding provider unavailable"):

@@ -596,8 +596,10 @@ Private helpers (≤ 20 lines each): `_require(env, names, missing) -> dict[str,
 `_parse_int(env, name, invalid, *, minimum) -> int | None`, `_parse_float(...)`,
 `_parse_bool(env, name, default) -> bool` (moves `_FALSY_ENV_VALUES` from `cli.py`),
 `_parse_hosts(raw) -> tuple[str, ...]`, `_embeddings(env, missing, invalid) -> EmbeddingsSettings | None`.
-`load_settings` collects into `missing`/`invalid` lists and raises once at the end. It calls
-`load_search_config(env)` and folds its `ValidationError` into `invalid`.
+`load_settings` collects into `missing`/`invalid` lists and raises once at the end. For the search
+variables it checks that each value parses, then runs `load_search_config` once per rule group
+(boost bounds; default limit against max limit), so every bad variable is named with a value-free
+reason. `config.py`'s own message quotes the value and stops at the first problem.
 
 ### CLI decomposition
 

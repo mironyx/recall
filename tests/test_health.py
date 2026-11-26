@@ -33,6 +33,7 @@ from recall.logging import (
 )
 from recall.server import create_app
 from recall.telemetry import configure_telemetry, get_trace_context
+from tests.conftest import make_settings
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,7 +72,7 @@ async def _asgi_client(app: Any) -> httpx.AsyncClient:
 @pytest.fixture
 async def asgi_client(postgres_dsn: str) -> AsyncIterator[httpx.AsyncClient]:
     """ASGI client against a real Postgres container — used by /readyz happy path."""
-    app = create_app(postgres_dsn)
+    app = create_app(make_settings(postgres_dsn))
     # Use LifespanManager-style entry: httpx's ASGITransport will dispatch
     # lifespan events when wrapped in an AsyncClient + explicit startup call.
     transport = httpx.ASGITransport(app=app)
@@ -84,7 +85,7 @@ async def asgi_client(postgres_dsn: str) -> AsyncIterator[httpx.AsyncClient]:
 @pytest.fixture
 async def asgi_client_bad_db(bad_dsn: str) -> AsyncIterator[httpx.AsyncClient]:
     """ASGI client wired to an unreachable DSN — exercises /readyz 503 path."""
-    app = create_app(bad_dsn)
+    app = create_app(make_settings(bad_dsn))
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         yield client
@@ -236,17 +237,17 @@ class TestOtelSetup:
     """Unit tests for ``configure_telemetry`` no-op path."""
 
     def test_noop_mode_when_no_endpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """O1: ``configure_telemetry()`` is a no-op and does not raise when
+        """O1: ``configure_telemetry(os.environ)`` is a no-op and does not raise when
         ``OTEL_EXPORTER_OTLP_ENDPOINT`` is unset."""
         monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
         # Must not raise.
-        configure_telemetry()
+        configure_telemetry(os.environ)
 
     def test_trace_context_available_in_noop_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """I5: ``get_trace_context()`` returns a ``(str, str)`` tuple even in
         no-op mode (both values may be empty, but the shape is fixed)."""
         monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
-        configure_telemetry()
+        configure_telemetry(os.environ)
 
         ctx = get_trace_context()
         assert isinstance(ctx, tuple)
@@ -278,8 +279,8 @@ class TestBootAndHealthSmoke:
         os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
 
         configure_logging()
-        configure_telemetry()
-        app = create_app(postgres_dsn)
+        configure_telemetry(os.environ)
+        app = create_app(make_settings(postgres_dsn))
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:

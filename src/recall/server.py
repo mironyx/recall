@@ -12,7 +12,6 @@ lifespan, serving requests through the SDK's Streamable HTTP ASGI app.
 from __future__ import annotations
 
 import json
-import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -37,7 +36,8 @@ from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from recall.auth import AuthConfig, authenticate, load_auth_config
-from recall.config import SearchConfig, load_search_config
+from recall.config import SearchConfig
+from recall.db.schema import describe_db_error
 from recall.embeddings.provider import guarded_embed, validate_dim
 from recall.embeddings.stub import StubEmbeddingsProvider
 from recall.errors import UnauthenticatedError
@@ -52,6 +52,8 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
     from langgraph.store.postgres import AsyncPostgresStore
+
+    from recall.settings import Settings
 
 _log = structlog.get_logger(__name__)
 
@@ -282,31 +284,14 @@ class _McpRuntime:
     router: ToolRouter | None = None
 
 
-def _load_auth_config() -> AuthConfig:
-    """Load the bearer token map from ``RECALL_AUTH_FILE`` (ADR-0007).
-
-    Falls back to an empty token map when the env var is unset so the CLI
-    dry-run path (no auth file) still boots; with no tokens every MCP call
-    is rejected as unauthenticated.
-    """
-    path = os.environ.get("RECALL_AUTH_FILE")
-    if path is None:
-        _log.warning(
-            "auth_unconfigured",
-            hint="RECALL_AUTH_FILE unset — every MCP tool call will be rejected as unauthenticated",
-        )
-        return AuthConfig(token_map={})
-    return load_auth_config(path)
-
-
 def _build_store(
-    conn_string: str,
+    settings: Settings,
 ) -> AbstractAsyncContextManager[AsyncPostgresStore, bool | None]:
     """Build the AsyncPostgresStore wired to the stub embedder through ``guarded_embed``
     (ADR-0008, LLD §3.4).
 
-    The vector dim comes from ``RECALL_EMBEDDING_DIMS`` (schema.py default
-    1536) and is fail-fast checked against the provider before the index
+    The vector dim is ``settings.embeddings.dim``, the same value ``ensure_schema``
+    receives, and is fail-fast checked against the provider before the index
     config is built (LLD §LLD-e1-embedder). ``from_conn_string`` returns an
     async context manager: the connection pool and table setup are deferred
     to the app lifespan, so an unreachable DSN does not break construction.
@@ -314,18 +299,24 @@ def _build_store(
     from langgraph.store.postgres import AsyncPostgresStore
     from langgraph.store.postgres.base import PostgresIndexConfig
 
-    raw_dims = os.environ.get("RECALL_EMBEDDING_DIMS")
-    dims = int(raw_dims) if raw_dims else 1536
-    stub = StubEmbeddingsProvider(dim=dims)
+    embeddings = settings.embeddings
+    # TODO(REC-16): select the provider with build_provider(embeddings).
+    if embeddings.provider != "stub":
+        _log.warning(
+            "embeddings_provider_not_wired",
+            provider=embeddings.provider,
+            hint="this build embeds with the stub provider",
+        )
+    stub = StubEmbeddingsProvider(dim=embeddings.dim)
     # TODO(#91): this check is vacuous — the stub's dim comes from the same
-    # env var the check compares against; the real mismatch (env dim vs the
-    # existing vector(N) column) still fails late, at the first write.
+    # setting the check compares against; the real mismatch (configured dim vs
+    # the existing vector(N) column) still fails late, at the first write.
     # Deferred: catching it at startup needs schema introspection (Story 6.4).
-    validate_dim(stub, dims)
+    validate_dim(stub, embeddings.dim)
 
     return AsyncPostgresStore.from_conn_string(
-        conn_string,
-        index=PostgresIndexConfig(dims=dims, embed=guarded_embed(stub)),
+        settings.database_url,
+        index=PostgresIndexConfig(dims=embeddings.dim, embed=guarded_embed(stub)),
     )
 
 
@@ -403,6 +394,28 @@ async def _list_tools(
     )
 
 
+class StoreUnavailableError(RuntimeError):
+    """The store could not be opened at startup. Carries no part of ``DATABASE_URL``."""
+
+
+# Justification: the server logs a lifespan failure with its traceback, so the driver's
+# message must be replaced before it gets there (LLD I2).
+@asynccontextmanager
+async def _opened(
+    store: AbstractAsyncContextManager[AsyncPostgresStore, bool | None],
+) -> AsyncIterator[AsyncPostgresStore]:
+    """Enter ``store``, replacing a failure to open it with ``StoreUnavailableError``."""
+    entered = False
+    try:
+        async with store as instance:
+            entered = True
+            yield instance
+    except Exception as exc:
+        if entered:
+            raise
+        raise StoreUnavailableError(describe_db_error(exc)) from None
+
+
 def _build_lifespan(
     store: AbstractAsyncContextManager[AsyncPostgresStore, bool | None],
     auth_config: AuthConfig,
@@ -423,7 +436,7 @@ def _build_lifespan(
 
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
-        async with store as store_instance:
+        async with _opened(store) as store_instance:
             mcp_runtime.router = ToolRouter(
                 MemoryService(StorageAdapter(store_instance), search_config)
             )
@@ -433,12 +446,12 @@ def _build_lifespan(
     return lifespan
 
 
-def create_app(conn_string: str) -> Starlette:
+def create_app(settings: Settings) -> Starlette:
     """Create the ASGI application.
 
     Mounts:
       * ``/healthz`` — liveness probe
-      * ``/readyz``  — readiness probe, runs ``SELECT 1`` against ``conn_string``
+      * ``/readyz``  — readiness probe, runs ``SELECT 1`` against the database
       * ``/mcp``     — MCP Streamable HTTP endpoint (ADR-0006): memory_save
         and memory_get behind bearer-token auth (ADR-0007), served by the
         SDK's Streamable HTTP ASGI app
@@ -447,18 +460,17 @@ def create_app(conn_string: str) -> Starlette:
     handling a request carries ``request_id``/``trace_id``/``span_id``.
 
     The MCP tool surface is composed once at startup: auth config from
-    ``RECALL_AUTH_FILE``, a lazy :class:`AsyncPostgresStore` over
-    ``conn_string`` with the stub embedder, the
+    ``settings.auth_file``, a lazy :class:`AsyncPostgresStore` over
+    ``settings.database_url`` with the stub embedder, the
     MemoryService → StorageAdapter → store chain behind a :class:`ToolRouter`,
     and the lowlevel MCP server. The store pool and the dispatcher task group
     run for the app's lifetime (see :func:`_build_lifespan`).
 
-    ``conn_string`` is stashed on ``app.state.conn_string`` so the health
+    ``settings.database_url`` is stashed on ``app.state.conn_string`` so the health
     handlers can reach it without module-level state.
     """
-    auth_config = _load_auth_config()
-    search_config = load_search_config(os.environ)
-    store = _build_store(conn_string)
+    auth_config = load_auth_config(settings.auth_file)
+    store = _build_store(settings)
     mcp_runtime = _McpRuntime()
     mcp_server = _build_mcp_server(auth_config, mcp_runtime)
 
@@ -483,7 +495,7 @@ def create_app(conn_string: str) -> Starlette:
             Mount("/", mcp_app),
         ],
         middleware=[Middleware(RequestContextMiddleware)],
-        lifespan=_build_lifespan(store, auth_config, mcp_runtime, mcp_server, search_config),
+        lifespan=_build_lifespan(store, auth_config, mcp_runtime, mcp_server, settings.search),
     )
-    app.state.conn_string = conn_string
+    app.state.conn_string = settings.database_url
     return app
