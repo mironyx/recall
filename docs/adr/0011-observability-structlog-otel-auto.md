@@ -69,12 +69,15 @@ The libraries named above do not match the shipped code.
   probe uses `asyncpg`. Recall instruments `psycopg`
   (`opentelemetry-instrumentation-psycopg`); the readiness probe stays uninstrumented.
 - **HTTP server:** the Starlette app, via `opentelemetry-instrumentation-starlette`.
-- **Outbound HTTP: a known gap.** The `openai` SDK (3.60.0) sends requests through `httpx2`,
-  not `httpx`, and no maintained `httpx2` instrumentation exists (the PyPI package
-  `opentelemetry-instrumentation-httpx2` is an empty 0.0.0 placeholder). Phase 4 checks
-  whether the official `opentelemetry-instrumentation-openai-v2` supports the 3.x SDK; if it
-  does not, embedding calls have no span of their own and their time shows inside the
-  enclosing database or request span. Hand-rolled spans remain out of scope.
+- **Outbound embedding calls: the `openai` SDK, not `httpx`.** The SDK (3.60.0) sends requests
+  through `httpx2`, and no maintained `httpx2` instrumentation exists (the PyPI package
+  `opentelemetry-instrumentation-httpx2` is an empty 0.0.0 placeholder). The official
+  `opentelemetry-instrumentation-openai-v2` (2.4b0) wraps `openai.resources.embeddings.Embeddings.create`
+  directly, independent of the HTTP client, so it gives each embedding call a span. Message
+  content capture stays off (it is opt-in via
+  `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`), so memory content never reaches a span.
+  The in-process provider has no outbound call and no span. Hand-rolled spans remain out of scope.
 
 Versions pinned at design time (latest on PyPI, 2026-11-26): `opentelemetry-api`/`-sdk`/
-`-exporter-otlp-proto-http` 1.45.2 and the instrumentation packages 0.66b2.
+`-exporter-otlp-proto-http` 1.45.2, the Starlette and psycopg instrumentation packages 0.66b2,
+and `opentelemetry-instrumentation-openai-v2` 2.4b0 (beta).

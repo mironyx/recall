@@ -20,7 +20,7 @@
 | 0.3 | 2026-04-12 | LS / Claude | Merged hand-written REQUIREMENTS.md with skill-generated v2. Added Epics 3 (Self-Improving Instructions) and 5 (Project & Identity Scoping) with full ACs. Added Context, Design Principles, tool signature reference table, user_id field, anti-scope section, open questions. Renumbered epics. |
 | 0.4 | 2026-11-21 | LS / Claude | Story 1.4: `title` is updatable (design decision confirmed at E3 architect gate); `kind` stays immutable; metadata is replaced, not merged. `memory_update` tool row gains `title?`. Story 4.3: error codes are the stable `error` value; `hint` carries the detail (shipped wire shape). |
 | 0.5 | 2026-11-21 | LS / Claude | Story 1.4 AC7/Notes: `scope` and `project_id` locate the memory (ADR-0015), so they cannot express a change; a memory in another namespace is `not_found`. `kind`, `user_id`, `created_at`, `updated_at` are rejected by name. (LLD review finding.) |
-| 0.6 | 2026-11-26 | LS / Claude | Phase 4 architect gate. Stories 6.1/6.4: embeddings variables are `EMBEDDINGS_*` only (`OPENAI_API_KEY` dropped; `EMBEDDINGS_API_KEY` is required only for `openai`). Story 6.4: `stub` provider value for tests and local development; a dimension mismatch means recreating the database (no re-embed, ADR-0008 amendment 1); optional `RECALL_ALLOWED_HOSTS`. Story 6.3: `/readyz` is 503 until the embeddings provider is loaded. Story 6.5: Compose needs no API key and can call tools out of the box. |
+| 0.6 | 2026-11-26 | LS / Claude | Phase 4 architect gate. Stories 6.1/6.4: embeddings variables are `EMBEDDINGS_*` only (`OPENAI_API_KEY` dropped; `EMBEDDINGS_API_KEY` is required only for `openai`). Story 6.4: `stub` provider value for tests and local development; a dimension mismatch means recreating the database (no re-embed, ADR-0008 amendment 1); optional `RECALL_ALLOWED_HOSTS`. Story 6.3: the in-process model loads before the server listens; a load failure exits. Story 6.5: Compose needs no API key and can call tools out of the box. |
 
 ---
 
@@ -567,7 +567,7 @@ Makes Recall runnable as shared team infrastructure. A single container, environ
 - Given a running Recall server, when `GET /healthz` is called, then it returns HTTP 200 indicating the process is alive.
 - Given a running Recall server with a healthy database connection, when `GET /readyz` is called, then it returns HTTP 200 indicating readiness to serve requests.
 - Given a running Recall server with a broken database connection, when `GET /readyz` is called, then it returns HTTP 503 indicating the server is not ready.
-- Given the embeddings provider is still loading (e.g. an in-process model at cold start), when `GET /readyz` is called, then it returns HTTP 503; once the provider is loaded it reflects only database health.
+- Given the in-process embeddings provider, when the server starts, then it loads the model before it starts listening, so `/healthz` and `/readyz` answer only once the model is loaded; a model that fails to load stops startup with a non-zero exit.
 - Given the health endpoints, when called, then they respond within 1 second (they must not perform expensive operations).
 
 ---
