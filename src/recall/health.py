@@ -37,24 +37,28 @@ async def readyz(request: Request) -> JSONResponse:
     503 ``{"status": "not_ready", "reason": ...}`` on failure or timeout.
     """
     conn_string: str = request.app.state.conn_string
+    # Driver messages can quote parts of the connection string, and this endpoint is
+    # unauthenticated: only the exception type is logged or returned.
     try:
         conn = await asyncpg.connect(conn_string, timeout=_READYZ_CONNECT_TIMEOUT_SECONDS)
-    except (TimeoutError, OSError, asyncpg.PostgresError) as exc:
-        log.warning("readyz_db_unreachable", error=str(exc))
-        return JSONResponse(
-            {"status": "not_ready", "reason": f"database unreachable: {exc}"},
-            status_code=503,
-        )
+    except Exception as exc:
+        return _not_ready("readyz_db_unreachable", "database unreachable", exc)
 
     try:
         await asyncio.wait_for(conn.fetchval("SELECT 1"), timeout=_READYZ_QUERY_TIMEOUT_SECONDS)
     except (TimeoutError, OSError, asyncpg.PostgresError) as exc:
-        log.warning("readyz_query_failed", error=str(exc))
-        return JSONResponse(
-            {"status": "not_ready", "reason": f"database query failed: {exc}"},
-            status_code=503,
-        )
+        return _not_ready("readyz_query_failed", "database query failed", exc)
     finally:
         await conn.close()
 
     return JSONResponse({"status": "ready"})
+
+
+# Justification: both failure paths must redact the same way.
+def _not_ready(event: str, summary: str, exc: Exception) -> JSONResponse:
+    error_type = type(exc).__name__
+    log.warning(event, error_type=error_type)
+    return JSONResponse(
+        {"status": "not_ready", "reason": f"{summary} ({error_type})"},
+        status_code=503,
+    )

@@ -6,7 +6,6 @@ No mocking of the DB per ADR-0012.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 
@@ -15,6 +14,9 @@ import pytest
 from psycopg import errors as pg_errors
 
 from recall.db.schema import ensure_schema
+from tests.conftest import _embedding_dims, stub_env
+
+_DIMS = _embedding_dims()
 
 pytestmark = pytest.mark.integration
 
@@ -47,24 +49,24 @@ class TestEnsureSchema:
 
     async def test_creates_all_tables(self, pg_conn: str) -> None:
         """Given an empty DB, ensure_schema creates store and store_vectors."""
-        await ensure_schema(pg_conn)
+        await ensure_schema(pg_conn, _DIMS)
         assert await _table_exists(pg_conn, "store")
         assert await _table_exists(pg_conn, "store_vectors")
 
     async def test_idempotent_second_run(self, pg_conn: str) -> None:
         """Given a fully set-up DB, ensure_schema succeeds with no errors."""
-        await ensure_schema(pg_conn)
-        await ensure_schema(pg_conn)  # must not raise
+        await ensure_schema(pg_conn, _DIMS)
+        await ensure_schema(pg_conn, _DIMS)  # must not raise
 
     async def test_store_usable_after_setup(self, pg_conn: str) -> None:
         """After ensure_schema, AsyncPostgresStore.aput succeeds."""
         from langgraph.store.postgres import AsyncPostgresStore
 
-        from recall.db.schema import _phase0_index_config
+        from recall.db.schema import _index_config
 
-        await ensure_schema(pg_conn)
+        await ensure_schema(pg_conn, _DIMS)
         async with AsyncPostgresStore.from_conn_string(
-            pg_conn, index=_phase0_index_config()
+            pg_conn, index=_index_config(_DIMS)
         ) as store:
             await store.aput(
                 ("project", "test-proj"),
@@ -157,8 +159,7 @@ class TestCliDbMigrate:
 
     async def test_exits_zero_on_success(self, pg_conn: str) -> None:
         """`recall db migrate` with DATABASE_URL exits 0."""
-        env = dict(os.environ)
-        env["DATABASE_URL"] = pg_conn
+        env = stub_env(pg_conn)
         result = subprocess.run(  # noqa: ASYNC221
             [sys.executable, "-m", "recall.cli", "db", "migrate"],
             capture_output=True,
@@ -179,8 +180,7 @@ class TestCliServeStartup:
 
     async def test_default_runs_schema_setup(self, pg_conn: str) -> None:
         """Default (flag unset) → schema is set up on startup."""
-        env = dict(os.environ)
-        env["DATABASE_URL"] = pg_conn
+        env = stub_env(pg_conn)
         subprocess.run(  # noqa: ASYNC221
             [sys.executable, "-m", "recall.cli", "serve", "--dry-run"],
             capture_output=True,
@@ -191,8 +191,7 @@ class TestCliServeStartup:
 
     async def test_false_skips_schema_setup(self, pg_conn: str) -> None:
         """RECALL_DB_MIGRATE_ON_STARTUP=false → schema NOT set up."""
-        env = dict(os.environ)
-        env["DATABASE_URL"] = pg_conn
+        env = stub_env(pg_conn)
         env["RECALL_DB_MIGRATE_ON_STARTUP"] = "false"
         subprocess.run(  # noqa: ASYNC221
             [sys.executable, "-m", "recall.cli", "serve", "--dry-run"],

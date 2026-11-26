@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import traceback
 
 import structlog
 
@@ -66,6 +67,15 @@ def configure_logging(log_level: str = "INFO") -> None:
         root.removeHandler(existing)
     root.addHandler(handler)
     root.setLevel(level)
+
+
+# Justification: one rule for every startup failure that must not print its message (LLD I2).
+def stack_frames(exc: BaseException) -> list[str]:
+    """Where ``exc`` was raised: file, line and source of each frame.
+
+    Carries no exception message, chained exception or local variable.
+    """
+    return traceback.format_tb(exc.__traceback__)
 
 
 def bind_request_context(

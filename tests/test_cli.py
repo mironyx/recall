@@ -9,6 +9,8 @@ import os
 import subprocess
 import sys
 
+from tests.conftest import stub_env
+
 
 class TestCLIStubs:
     """CLI commands are reachable and produce clean output."""
@@ -19,6 +21,8 @@ class TestCLIStubs:
             [sys.executable, "-m", "recall.cli", "serve", "--dry-run"],
             capture_output=True,
             timeout=10,
+            env=stub_env("postgresql://nouser:nopass@127.0.0.1:1/nodb")
+            | {"RECALL_DB_MIGRATE_ON_STARTUP": "false"},
         )
         assert result.returncode == 0
 

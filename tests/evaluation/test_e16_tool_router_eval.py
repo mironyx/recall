@@ -31,13 +31,12 @@ database is never mocked (CLAUDE.md, ADR-0012).
 
 from __future__ import annotations
 
-import os
 import uuid
 from typing import TYPE_CHECKING, Any
 
 import pytest
 import pytest_asyncio
-from tests.conftest import _truncate_all
+from tests.conftest import _truncate_all, make_settings
 
 from recall.memory_service import MemoryService
 from recall.server import _build_store, create_app
@@ -149,7 +148,7 @@ class TestNamespaceIsolation:
 class _FixedDimProvider:
     """Stand-in provider whose dim ignores construction — forces a mismatch.
 
-    The real ``StubEmbeddingsProvider`` is constructed from the same env var
+    The real ``StubEmbeddingsProvider`` is constructed from the same setting
     ``_build_store`` validates against, so through the public path the
     mismatch can never arise. The BDD property ("EMBEDDINGS_DIM != provider.dim
     raises at startup") therefore requires a provider whose dim differs from
@@ -175,21 +174,16 @@ class TestStartupDimValidation:
     def test_dim_mismatch_fails_fast_at_startup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Given EMBEDDINGS_DIM=7 with a 1536-dim provider, when create_app is
         called, then ValueError is raised — no app is served."""
-        monkeypatch.setenv("RECALL_EMBEDDING_DIMS", "7")
-        monkeypatch.delenv("RECALL_AUTH_FILE", raising=False)
         monkeypatch.setattr("recall.server.StubEmbeddingsProvider", _FixedDimProvider)
 
         with pytest.raises(ValueError, match="EMBEDDINGS_DIM=7 does not match"):
-            create_app("postgresql://nouser:nopass@127.0.0.1:1/nodb")
+            create_app(make_settings("postgresql://nouser:nopass@127.0.0.1:1/nodb", dim=7))
 
     def test_matching_dim_constructs_app(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Given the configured dim matching the provider's dim, when
         create_app is called, then construction succeeds (positive control for
         the fail-fast branch — the check must not raise unconditionally)."""
-        monkeypatch.setenv("RECALL_EMBEDDING_DIMS", "1536")
-        monkeypatch.delenv("RECALL_AUTH_FILE", raising=False)
-
-        app = create_app("postgresql://nouser:nopass@127.0.0.1:1/nodb")
+        app = create_app(make_settings("postgresql://nouser:nopass@127.0.0.1:1/nodb", dim=1536))
 
         assert app.state.conn_string  # the app was built and wired
 
@@ -211,17 +205,10 @@ class TestCompositionRootStoreWiring:
         """Given the store built by the composition root over a real database,
         when an index-enabled put is performed, then embedding runs and the
         record round-trips — ``_noop_embed`` would raise RuntimeError here."""
-        saved_env = {
-            var: os.environ.get(var) for var in ("RECALL_EMBEDDING_DIMS", "RECALL_EMBEDDINGS_DIM")
-        }
         try:
-            # Server defaults must match the schema default dim (1536) that
-            # ensure_schema used, exactly as the e2e ``app`` fixture does.
-            for var in ("RECALL_EMBEDDING_DIMS", "RECALL_EMBEDDINGS_DIM"):
-                os.environ.pop(var, None)
             await _truncate_all(pg_conn_string)
 
-            async with _build_store(pg_conn_string) as store:
+            async with _build_store(make_settings(pg_conn_string)) as store:
                 key = str(uuid.uuid4())
                 await store.aput(
                     ("project", "proj-eval"),
@@ -235,8 +222,3 @@ class TestCompositionRootStoreWiring:
             assert item.value["content"] == "embed me via the composition root"
         finally:
             await _truncate_all(pg_conn_string)
-            for var, value in saved_env.items():
-                if value is None:
-                    os.environ.pop(var, None)
-                else:
-                    os.environ[var] = value

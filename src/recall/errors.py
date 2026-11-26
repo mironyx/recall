@@ -65,3 +65,7 @@ class EmbeddingError(RecallError):
             error=ErrorCode.EMBEDDING_FAILED,
             hint="Embedding generation failed. Retry; if it persists, contact the server operator.",
         )
+
+
+class StartupError(ValueError):
+    """A startup failure whose message Recall writes itself, so it is safe to log."""

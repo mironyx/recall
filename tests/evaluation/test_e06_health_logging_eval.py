@@ -26,6 +26,7 @@ from typing import Any
 import httpx
 import pytest
 import structlog
+from tests.conftest import make_settings
 
 from recall.logging import bind_request_context, configure_logging, unbind_request_context
 from recall.server import create_app
@@ -115,8 +116,8 @@ class TestRequestContextWiring:
         """
         os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
         configure_logging()
-        configure_telemetry()
-        app = create_app(postgres_dsn)
+        configure_telemetry(os.environ)
+        app = create_app(make_settings(postgres_dsn))
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -172,7 +173,7 @@ class TestTraceContextInLogOutput:
         """
         monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
         configure_logging()
-        configure_telemetry()
+        configure_telemetry(os.environ)
 
         # Simulate what the transport boundary should do: extract OTEL context
         # and bind it into the structlog contextvar.

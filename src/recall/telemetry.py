@@ -12,7 +12,7 @@ auto-instrumentation for the HTTP listener, asyncpg, and outbound httpx.
 
 from __future__ import annotations
 
-import os
+from collections.abc import Mapping
 
 import structlog
 from opentelemetry import trace
@@ -23,16 +23,16 @@ _INVALID_TRACE_ID = 0
 _INVALID_SPAN_ID = 0
 
 
-def configure_telemetry() -> None:
+def configure_telemetry(env: Mapping[str, str]) -> None:
     """Initialise OTEL in no-op or export mode.
 
-    Reads ``OTEL_EXPORTER_OTLP_ENDPOINT``. If unset, no provider is installed
+    Reads ``OTEL_EXPORTER_OTLP_ENDPOINT`` from ``env``. If unset, no provider is installed
     — :mod:`opentelemetry.trace` already returns a no-op tracer by default, so
     this is a cheap sanity check with no side effects. If set, the export
     branch (auto-instrumentation + OTLP exporter) would be wired; that code is
     out of scope for Phase 0 and will land in E4.2.
     """
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    endpoint = env.get("OTEL_EXPORTER_OTLP_ENDPOINT")
     if not endpoint:
         return
     # Export mode is wired in E4.2. Warn loudly so an operator who set the
