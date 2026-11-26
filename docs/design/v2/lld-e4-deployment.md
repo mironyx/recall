@@ -7,7 +7,7 @@
 | Epic | E4 — Real deployment |
 | Phase | 4 |
 | Epic issue | REC-14 |
-| Task issues | _backfilled by /architect_ |
+| Task issues | REC-15 (§4.1), REC-16 (§4.2), REC-17 (§4.3), REC-18 (§4.4), REC-19 (§4.5), REC-20 (§4.6) |
 | HLD components | Configuration, Embedder, Health Endpoints, MCP Transport, CLI, Tool Router (logging) |
 | ADRs | 0006 (transport), 0007 (bearer auth), 0008 (+ amendment 1), 0011 (+ amendment 1), 0012 (real Postgres), 0013 (in-app DDL) |
 | Status | Draft |

@@ -8,7 +8,7 @@ epic: e4
 entries:
   - req: REQ-story-13-embedding-generation-on-save
     lld: v2/lld-e4-deployment.md#LLD-e4-openai-provider
-    issue: null
+    issue: REC-16
     files: []
     status: Approved
     lld_revision: r1
@@ -16,7 +16,7 @@ entries:
 
   - req: REQ-story-61-single-container-deployment
     lld: v2/lld-e4-deployment.md#LLD-e4-settings
-    issue: null
+    issue: REC-15
     files: []
     status: Approved
     lld_revision: r1
@@ -24,7 +24,7 @@ entries:
 
   - req: REQ-story-63-health-check-endpoints
     lld: v2/lld-e4-deployment.md#LLD-e4-local-provider
-    issue: null
+    issue: REC-17
     files: []
     status: Approved
     lld_revision: r1
@@ -32,23 +32,23 @@ entries:
 
   - req: REQ-story-64-environment-based-configuration
     lld: v2/lld-e4-deployment.md#LLD-e4-settings
-    issue: null
+    issue: REC-15
     files: []
     status: Approved
     lld_revision: r1
-    # Also §4.2 (openai provider), §4.3 (sentence-transformers), §4.4 (#LLD-e4-dim-check),
-    # §4.5 (RECALL_ALLOWED_HOSTS).
+    # Also §4.2 openai provider (REC-16), §4.3 sentence-transformers (REC-17),
+    # §4.4 dimension check (#LLD-e4-dim-check, REC-18), §4.5 RECALL_ALLOWED_HOSTS (REC-19).
 
   - req: REQ-story-65-local-development-with-docker-compose
     lld: v2/lld-e4-deployment.md#LLD-e4-deployment
-    issue: null
+    issue: REC-19
     files: []
     status: Approved
     lld_revision: r1
 
   - req: REQ-story-72-mcp-connection-configuration-snippet
     lld: v2/lld-e4-deployment.md#LLD-e4-deployment
-    issue: null
+    issue: REC-19
     files: []
     status: Approved
     lld_revision: r1
@@ -56,7 +56,7 @@ entries:
 
   - req: REQ-cc-observability
     lld: v2/lld-e4-deployment.md#LLD-e4-tracing
-    issue: null
+    issue: REC-20
     files: []
     status: Approved
     lld_revision: r1
