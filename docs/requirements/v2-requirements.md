@@ -4,11 +4,11 @@
 
 | Field | Value |
 |-------|-------|
-| Version | 0.5 |
+| Version | 0.6 |
 | Status | Draft — Complete |
 | Author | LS / Claude |
 | Created | 2026-04-12 |
-| Last updated | 2026-11-21 |
+| Last updated | 2026-11-26 |
 
 ## Change Log
 
@@ -20,6 +20,7 @@
 | 0.3 | 2026-04-12 | LS / Claude | Merged hand-written REQUIREMENTS.md with skill-generated v2. Added Epics 3 (Self-Improving Instructions) and 5 (Project & Identity Scoping) with full ACs. Added Context, Design Principles, tool signature reference table, user_id field, anti-scope section, open questions. Renumbered epics. |
 | 0.4 | 2026-11-21 | LS / Claude | Story 1.4: `title` is updatable (design decision confirmed at E3 architect gate); `kind` stays immutable; metadata is replaced, not merged. `memory_update` tool row gains `title?`. Story 4.3: error codes are the stable `error` value; `hint` carries the detail (shipped wire shape). |
 | 0.5 | 2026-11-21 | LS / Claude | Story 1.4 AC7/Notes: `scope` and `project_id` locate the memory (ADR-0015), so they cannot express a change; a memory in another namespace is `not_found`. `kind`, `user_id`, `created_at`, `updated_at` are rejected by name. (LLD review finding.) |
+| 0.6 | 2026-11-26 | LS / Claude | Phase 4 architect gate. Stories 6.1/6.4: embeddings variables are `EMBEDDINGS_*` only (`OPENAI_API_KEY` dropped; `EMBEDDINGS_API_KEY` is required only for `openai`). Story 6.4: `stub` provider value for tests and local development; a dimension mismatch means recreating the database (no re-embed, ADR-0008 amendment 1); optional `RECALL_ALLOWED_HOSTS`. Story 6.3: the in-process model loads before the server listens; a load failure exits. Story 6.5: Compose needs no API key and can call tools out of the box. |
 
 ---
 
@@ -534,7 +535,7 @@ Makes Recall runnable as shared team infrastructure. A single container, environ
 **Acceptance Criteria:**
 
 - Given a Dockerfile in the repository, when built, then it produces a single container image that runs the Recall server.
-- Given the container is started with `DATABASE_URL` and `OPENAI_API_KEY` environment variables set, when it starts, then the server begins accepting MCP connections.
+- Given the container is started with `DATABASE_URL`, `RECALL_AUTH_FILE` and the `EMBEDDINGS_*` variables for its provider set, when it starts, then the server begins accepting MCP connections.
 - Given the container is started without `DATABASE_URL`, when it starts, then it exits with a clear error message indicating the missing configuration.
 - Given the container image, when inspected, then it contains no bundled database — Recall connects to an external Postgres instance.
 
@@ -566,6 +567,7 @@ Makes Recall runnable as shared team infrastructure. A single container, environ
 - Given a running Recall server, when `GET /healthz` is called, then it returns HTTP 200 indicating the process is alive.
 - Given a running Recall server with a healthy database connection, when `GET /readyz` is called, then it returns HTTP 200 indicating readiness to serve requests.
 - Given a running Recall server with a broken database connection, when `GET /readyz` is called, then it returns HTTP 503 indicating the server is not ready.
+- Given the in-process embeddings provider, when the server starts, then it loads the model before it starts listening, so `/healthz` and `/readyz` answer only once the model is loaded; a model that fails to load stops startup with a non-zero exit.
 - Given the health endpoints, when called, then they respond within 1 second (they must not perform expensive operations).
 
 ---
@@ -573,7 +575,7 @@ Makes Recall runnable as shared team infrastructure. A single container, environ
 ### Story 6.4: Environment-based configuration
 
 **As an** operator,
-**I want to** configure Recall entirely through environment variables (`DATABASE_URL`, `OPENAI_API_KEY`, etc.),
+**I want to** configure Recall entirely through environment variables (`DATABASE_URL`, `EMBEDDINGS_*`, etc.),
 **so that** I can use standard secrets management and deployment tooling without config files.
 
 **Acceptance Criteria:**
@@ -584,7 +586,9 @@ Makes Recall runnable as shared team infrastructure. A single container, environ
 - Given `RECALL_AUTH_FILE` pointing to a JSON file, when the server starts, then it loads the bearer token-to-user mapping from that file.
 - Given an optional `RECALL_HOST` and `RECALL_PORT` variable, when set, then the server binds to that host and port. When unset, sensible defaults are used.
 - Given a required environment variable is missing, when the server starts, then it exits immediately with an error listing all missing required variables.
-- Given `EMBEDDINGS_DIM` is configured, when the server starts, then it validates the configured dimension matches the existing `vector(N)` column (if any) and fails fast on mismatch.
+- Given `EMBEDDINGS_PROVIDER` set to `stub`, when the server generates embeddings, then it uses the deterministic test provider (no model, no network). `stub` is for tests and local development only.
+- Given `EMBEDDINGS_DIM` is configured, when the server starts, then it validates the configured dimension matches both the provider and the existing `vector(N)` column (if any) and fails fast on mismatch with an error telling the operator to recreate the database. Recall does not re-embed existing memories.
+- Given an optional `RECALL_ALLOWED_HOSTS` (comma-separated host names), when set, then MCP requests whose `Host` header is not listed are rejected. When unset, any host is accepted.
 
 ---
 
@@ -598,7 +602,8 @@ Makes Recall runnable as shared team infrastructure. A single container, environ
 
 - Given the `docker-compose.yml` in the repository, when `docker compose up` is run, then Postgres (with pgvector), and the Recall server start and connect to each other.
 - Given the Compose stack is running, when an MCP client connects to the Recall server's exposed port, then it can call tools successfully.
-- Given a fresh clone of the repository, when `docker compose up` is run with no prior setup, then the stack starts successfully (migrations run automatically).
+- Given a fresh clone of the repository, when `docker compose up` is run with no prior setup, then the stack starts successfully (migrations run automatically) using the in-process embeddings provider, with no API key.
+- Given the Compose stack is running, when a client uses the documented development token, then tool calls are authenticated.
 
 ---
 

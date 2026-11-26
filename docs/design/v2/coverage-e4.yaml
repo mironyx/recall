@@ -1,0 +1,63 @@
+# Coverage manifest — Epic E4 (Real deployment)
+#
+# Maps requirements stories to LLD sections and implementing task issues.
+# `issue` values are backfilled by /architect once the tasks exist;
+# files are backfilled by edf:feature-end after merge.
+
+epic: e4
+entries:
+  - req: REQ-story-13-embedding-generation-on-save
+    lld: v2/lld-e4-deployment.md#LLD-e4-openai-provider
+    issue: REC-16
+    files: []
+    status: Approved
+    lld_revision: r1
+    # AC4/AC5 (timeout, single retry). Save-time embedding itself: coverage-e1.yaml.
+
+  - req: REQ-story-61-single-container-deployment
+    lld: v2/lld-e4-deployment.md#LLD-e4-settings
+    issue: REC-15
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Image build arg and model packaging: §4.3 (#LLD-e4-local-provider).
+
+  - req: REQ-story-63-health-check-endpoints
+    lld: v2/lld-e4-deployment.md#LLD-e4-local-provider
+    issue: REC-17
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Only the v0.6 model-load AC. Endpoints themselves: Phase 0 (lld-e06-health-logging.md).
+
+  - req: REQ-story-64-environment-based-configuration
+    lld: v2/lld-e4-deployment.md#LLD-e4-settings
+    issue: REC-15
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Also §4.2 openai provider (REC-16), §4.3 sentence-transformers (REC-17),
+    # §4.4 dimension check (#LLD-e4-dim-check, REC-18), §4.5 RECALL_ALLOWED_HOSTS (REC-19).
+
+  - req: REQ-story-65-local-development-with-docker-compose
+    lld: v2/lld-e4-deployment.md#LLD-e4-deployment
+    issue: REC-19
+    files: []
+    status: Approved
+    lld_revision: r1
+
+  - req: REQ-story-72-mcp-connection-configuration-snippet
+    lld: v2/lld-e4-deployment.md#LLD-e4-deployment
+    issue: REC-19
+    files: []
+    status: Approved
+    lld_revision: r1
+    # Story 7.1 (reference agent instructions) stays in Phase 5 (E5.3).
+
+  - req: REQ-cc-observability
+    lld: v2/lld-e4-deployment.md#LLD-e4-tracing
+    issue: REC-20
+    files: []
+    status: Approved
+    lld_revision: r1
+    # OTEL export only. Per-call mcp_call logging shipped in Phase 1.

@@ -247,29 +247,47 @@ error-path integration test.
 
 ## Phase 4 — Real deployment story
 
+> **Revised 2026-11-26** at the Phase 4 `/architect` gate. The April draft predated the
+> shipped code: it missed startup configuration (Story 6.4), the real dimension check, Compose
+> auth and allowed hosts, and named `asyncpg` where the store uses `psycopg`. Design:
+> [lld-e4-deployment.md](../design/v2/lld-e4-deployment.md). ADR-0008 and ADR-0011 carry
+> Phase 4 amendments.
+
 **Goal.** Recall is deployable as shared infrastructure with the documented
 env-var contract. OTEL works when turned on. The full embeddings provider
 matrix works.
 
+### E4.0 — Settings and fail-fast startup
+- **HLD reference:** Configuration.
+- **ADRs:** ADR-0008 (amendment 1: `EMBEDDINGS_*` names).
+- **Rough tasks:** one typed settings loader for every variable; missing required
+  variables listed together and the process exits; `RECALL_EMBEDDING_DIMS` retired.
+
 ### E4.1 — Real embeddings providers
 - **HLD reference:** Embedder.
-- **ADRs:** ADR-0008.
-- **Rough tasks:** sentence-transformers fully wired (cold start blocks
-  `/readyz`), OpenAI-compatible HTTP provider with timeout + single retry,
-  contract tests against real endpoints gated to nightly CI.
-
-### E4.2 — OTEL exporter activation
-- **HLD reference:** Tool Router (logging invariant).
-- **ADRs:** ADR-0011.
-- **Rough tasks:** auto-instrumentation for HTTP, asyncpg, outbound HTTP;
-  off-by-default check; trace_id/span_id correlation in logs verified
-  end-to-end.
+- **ADRs:** ADR-0008 (+ amendment 1).
+- **Rough tasks:** provider factory; OpenAI-compatible provider (one attempt, SDK retries
+  off) with timeout and single retry in `guarded_embed`; sentence-transformers in-process
+  (cold start blocks `/readyz`); startup check of `EMBEDDINGS_DIM` against the provider
+  and the existing `vector(N)` column. Provider change means recreating the database.
 
 ### E4.3 — Deployment artefacts and operator docs
 - **HLD reference:** CLI; MCP Transport.
 - **ADRs:** ADR-0006, ADR-0007.
-- **Rough tasks:** `docker-compose.yml` polish, README, MCP client config
-  snippet, env-var reference page.
+- **Rough tasks:** Compose with a development auth file and the in-process provider (no
+  API key), optional `RECALL_ALLOWED_HOSTS`, `.env.example` matching the code, env-var
+  reference page, README and MCP client snippets for Claude Code and Cursor.
+
+### E4.2 — OTEL exporter activation
+- **HLD reference:** Tool Router (logging invariant).
+- **ADRs:** ADR-0011 (+ amendment 1).
+- **Rough tasks:** OTLP exporter when `OTEL_EXPORTER_OTLP_ENDPOINT` is set;
+  auto-instrumentation for Starlette and `psycopg`; outbound embedding spans verified or
+  recorded as a known gap; trace_id/span_id correlation in logs verified end-to-end.
+
+**Known limits carried forward (not Phase 4 work).** A merged search embeds the query twice
+(lld-e2-search OQ1); filtered recall at scale may need `hnsw.ef_search` tuning
+(lld-e2-search). Both stay documented, not built.
 
 **Phase 4 exit criterion.** A second machine can `docker compose up`, point
 a real Claude Code client at the server with the documented snippet, save
