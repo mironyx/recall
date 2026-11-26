@@ -70,3 +70,31 @@ Caching, batching across requests, and provider warm-up beyond the startup load 
 - REQUIREMENTS.md — S1.2, S1.3, S5.1, S6.5
 - docs/design/v1-design.md — Embedder component; interactions I1, I2, I3
 - ADR-0001 (flat value schema): the embedding lives on the row, not in a side table
+
+## Amendment 1 (2026-11-26, Phase 4 architect): shipped interface, retry seam, stub, provider change
+
+Phase 1–3 implementation and the Phase 4 design settled four points this ADR left open or
+got wrong.
+
+1. **The interface is synchronous.** `embed(texts) -> list[list[float]]` is a plain method.
+   `AsyncPostgresStore` calls the embed callable synchronously inside a thread-pool executor
+   and rejects an async-only callable, so the "HTTP providers use the existing async HTTP
+   client" line above does not apply. HTTP providers use a sync client; the executor keeps
+   the event loop free.
+2. **Timeout and the single retry live in `guarded_embed`** (`recall.embeddings.provider`),
+   the one seam every provider is wired through. Providers make exactly one attempt: the
+   `openai` provider builds its client with `max_retries=0`, because the SDK retries twice
+   by default (openai 3.60.0, `DEFAULT_MAX_RETRIES = 2`) and would otherwise turn "one
+   retry" into up to six calls.
+3. **`stub` is a third `EMBEDDINGS_PROVIDER` value**, for tests and local development
+   only: deterministic, no network, no model. It is not documented as a deployment option.
+4. **Changing provider or model means recreating the database.** The `vector(N)` column is
+   fixed at schema creation and stored vectors are not comparable across models. Recall
+   does not re-embed existing memories; the startup dimension check (`EMBEDDINGS_DIM` vs
+   the existing column) fails fast with a "recreate the database" message. Accepted
+   because no deployed Recall database holds data worth migrating (decision at the
+   Phase 4 architect gate); a re-embed command can be added later if that changes.
+
+Environment variables are `EMBEDDINGS_PROVIDER`, `EMBEDDINGS_MODEL`, `EMBEDDINGS_BASE_URL`,
+`EMBEDDINGS_API_KEY` and `EMBEDDINGS_DIM`. The interim `RECALL_EMBEDDING_DIMS` name is
+retired in Phase 4.

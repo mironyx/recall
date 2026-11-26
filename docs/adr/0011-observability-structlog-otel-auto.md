@@ -59,3 +59,22 @@ No hand-rolled spans in v1. The exporter is **off by default**: if `OTEL_EXPORTE
 - REQUIREMENTS.md — S6.3, S6.3a
 - docs/design/v1-design.md — Observability component; cross-cutting through every other component
 - ADR-0006 (transport): the Streamable HTTP listener is what OTEL HTTP auto-instrumentation hooks into
+
+## Amendment 1 (2026-11-26, Phase 4 architect): instrumented libraries
+
+The libraries named above do not match the shipped code.
+
+- **Postgres: `psycopg`, not `asyncpg`.** `AsyncPostgresStore` (langgraph-checkpoint-postgres
+  3.2.1) runs every memory query through `psycopg` 3 and `psycopg_pool`. Only the `/readyz`
+  probe uses `asyncpg`. Recall instruments `psycopg`
+  (`opentelemetry-instrumentation-psycopg`); the readiness probe stays uninstrumented.
+- **HTTP server:** the Starlette app, via `opentelemetry-instrumentation-starlette`.
+- **Outbound HTTP: a known gap.** The `openai` SDK (3.60.0) sends requests through `httpx2`,
+  not `httpx`, and no maintained `httpx2` instrumentation exists (the PyPI package
+  `opentelemetry-instrumentation-httpx2` is an empty 0.0.0 placeholder). Phase 4 checks
+  whether the official `opentelemetry-instrumentation-openai-v2` supports the 3.x SDK; if it
+  does not, embedding calls have no span of their own and their time shows inside the
+  enclosing database or request span. Hand-rolled spans remain out of scope.
+
+Versions pinned at design time (latest on PyPI, 2026-11-26): `opentelemetry-api`/`-sdk`/
+`-exporter-otlp-proto-http` 1.45.2 and the instrumentation packages 0.66b2.
