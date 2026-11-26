@@ -70,7 +70,9 @@ sequenceDiagram
     else valid
         S-->>CLI: Settings
         CLI->>App: create_app(settings)
+        Note over App: No database access. An unwired provider or a bad<br/>auth file logs startup_failed, exit 1, nothing migrated
         App-->>CLI: Starlette app
+        CLI->>CLI: ensure_schema, if migrate on startup
     end
 ```
 
@@ -99,6 +101,11 @@ Optional, with defaults: `RECALL_HOST` (`0.0.0.0`), `RECALL_PORT` (`8080`), `LOG
 | I2 | `SettingsError` messages never contain the value of `EMBEDDINGS_API_KEY` or `DATABASE_URL` | unit test sets both to sentinel strings with an invalid sibling, asserts neither sentinel is in `str(err)` |
 | I3 | `Settings.embeddings.api_key` is excluded from `repr` | unit test on `repr(settings)` |
 
+Startup failures follow the same rule as I2. `schema_setup_failed`, `startup_failed` and
+`store_unavailable` log the error type and the stack frames (`traceback.format_tb`: no message,
+chained exception or local variable). A message is logged only if it cannot quote `DATABASE_URL`:
+a `StartupError` (written by Recall) or a Postgres statement error with a SQLSTATE.
+
 ### Acceptance criteria
 
 - [ ] `recall serve` with an empty environment exits 1, and stderr names `DATABASE_URL`, `RECALL_AUTH_FILE`, `EMBEDDINGS_PROVIDER` and `EMBEDDINGS_DIM` in one message, with no traceback.
@@ -107,6 +114,8 @@ Optional, with defaults: `RECALL_HOST` (`0.0.0.0`), `RECALL_PORT` (`8080`), `LOG
 - [ ] `recall db migrate` without `EMBEDDINGS_DIM` exits 1 naming it.
 - [ ] `ensure_schema` takes the dimension as a parameter, so the schema and the store use one value.
 - [ ] `RECALL_EMBEDDING_DIMS` is read nowhere in `src/` or `tests/`.
+- [ ] A provider that is not wired in this build stops `recall serve` with exit 1 before any migration, naming `EMBEDDINGS_PROVIDER`, the supported provider and the issue that adds each other one. Nothing falls back to the stub. `recall db migrate` is unaffected.
+- [ ] A startup failure logs its stack frames, and no part of `DATABASE_URL` appears.
 
 ### BDD specs
 
@@ -127,6 +136,16 @@ class TestServeStartup:  # subprocess
     def test_db_migrate_without_dim_exits_one(self): ...
     def test_non_numeric_port_reported_by_name_without_traceback(self): ...
     def test_cli_flags_override_settings(self): ...
+
+class TestUnwiredProvider:
+    def test_create_app_refuses_naming_support_and_issue(self): ...
+    def test_serve_exits_one_before_migrating(self): ...
+
+class TestStartupFailureLocation:
+    def test_store_open_failure_logs_frames_without_messages(self): ...
+    def test_cli_failure_logs_frames_without_messages(self): ...
+    def test_bad_auth_file_is_explained(self): ...
+    def test_database_url_given_as_auth_file_is_not_echoed(self): ...
 ```
 
 ## 4.2 OpenAI-compatible provider, timeout and retry
@@ -538,9 +557,12 @@ class TestPlaceholderRemoved:
 src/recall/settings.py       — new: Settings, EmbeddingsSettings, DbSettings, SettingsError, loaders
 src/recall/cli.py            — serve/db migrate load settings, print SettingsError, exit 1
 src/recall/server.py         — create_app(settings: Settings); _build_store(settings); no os.environ
-src/recall/db/schema.py      — ensure_schema(conn_string, dims); _index_config(dims)
+src/recall/db/schema.py      — ensure_schema(conn_string, dims); _index_config(dims); describe_db_error(exc)
+src/recall/errors.py         — StartupError(ValueError): a startup message that is safe to log
+src/recall/logging.py        — stack_frames(exc) -> list[str]
 src/recall/config.py         — unchanged (SearchConfig stays here)
 tests/test_settings.py       — new
+tests/test_startup.py        — new: unwired providers, startup failure logging
 tests/conftest.py            — make_settings(...) helper; app_factory builds Settings; EMBEDDINGS_DIM
 tests/test_cli.py, tests/test_health.py, tests/test_schema.py — call-site updates
 tests/test_memory_service.py, tests/evaluation/test_e16_tool_router_eval.py — RECALL_EMBEDDING_DIMS → EMBEDDINGS_DIM
@@ -608,8 +630,9 @@ _cmd_serve(args, env):                                         # env = os.enviro
     configure_logging(args.log_level or "INFO"); configure_telemetry(env)   # §4.6 adds instrument_app
     settings = _load_or_exit(load_settings, env)               # SettingsError → stderr "error: …", exit 1
     settings = _apply_flags(settings, args)                    # only flags actually given override
-    if settings.migrate_on_startup: asyncio.run(ensure_schema(settings.database_url, settings.embeddings.dim))
     app = create_app(settings)                                 # any exception: log startup_failed, exit 1
+    if settings.migrate_on_startup: asyncio.run(ensure_schema(settings.database_url, settings.embeddings.dim))
+                                                               # failure: log schema_setup_failed, exit 1
     ...uvicorn.run(app, host=settings.host, port=settings.port, log_config=None)
 
 _cmd_db_migrate(args, env): db = _load_or_exit(load_db_settings, env); ensure_schema(db.database_url, db.embeddings_dim)
@@ -623,6 +646,10 @@ fields whose flag is not `None`. `configure_logging` first runs with `args.log_l
 and is reconfigured with `settings.log_level` once settings load. The `database_url_unset`
 warning path is deleted: `DATABASE_URL` is now required.
 
+> **Constraint:** until §4.2 and §4.3 wire them, `_build_store` raises `StartupError` for
+> `openai` and `sentence-transformers`. `create_app` also turns an unreadable or invalid auth
+> file into `StartupError`, without quoting the configured path.
+>
 > **Constraint:** `create_app(settings)` replaces `create_app(conn_string)`.
 > `app.state.conn_string = settings.database_url` stays for the health handlers.
 > `_load_auth_config` becomes `load_auth_config(settings.auth_file)`; the
@@ -734,8 +761,11 @@ class SentenceTransformersProvider(EmbeddingsProvider):
 > one team. Higher load is what the `openai` provider is for.
 
 `create_app` → `_build_store` → `build_provider` → `validate_dim(provider, cfg.dim)` already
-runs at composition time, so D6 needs no new call site. A `ValueError` there (mismatch) or a
-load error propagates to `cli._cmd_serve`, which logs `startup_failed` and exits 1 (§4.1).
+runs at composition time, so D6 needs no new call site. A mismatch (`StartupError`) or a load
+error propagates to `cli._cmd_serve`, which logs `startup_failed` and exits 1 (§4.1). Only a
+`StartupError` message is logged, so the missing-extra and model-load failures must raise
+`StartupError` with a message Recall writes. §4.2 and §4.3 each remove their provider from the
+unwired refusal in `_build_store`.
 
 ### Packaging
 

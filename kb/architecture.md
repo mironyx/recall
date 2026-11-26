@@ -40,7 +40,7 @@ Reuse both when adding providers or index-backed wiring.
 
 ## Errors, embed seam, update and delete (E3)
 
-- `src/recall/errors.py` — `ErrorCode` is the single registry of wire error codes (`unauthenticated`, `validation_error`, `not_found`, `embedding_failed`, `internal_error`). Raise `RecallError` subclasses; never write a code literal elsewhere.
+- `src/recall/errors.py` — `ErrorCode` is the single registry of wire error codes (`unauthenticated`, `validation_error`, `not_found`, `embedding_failed`, `internal_error`). Raise `RecallError` subclasses; never write a code literal elsewhere. `StartupError` (not a wire error) carries the startup messages that are safe to log; any other startup exception logs its type and `recall.logging.stack_frames` only.
 - `recall.embeddings.provider.guarded_embed(provider)` — the embed seam: wraps any provider exception as `EmbeddingError`. Wire every provider through it; never pass `provider.embed` to `PostgresIndexConfig` directly.
 - `StorageAdapter.delete` — namespaced delete via `_build_namespace`; the store cascades to `store_vectors`. Idempotent.
 - `MemoryService.update` — re-embeds only when `content` changes (`index=["content"]` vs `index=False`). Never call `put` with `index=None` on an existing memory.

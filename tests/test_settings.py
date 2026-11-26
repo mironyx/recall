@@ -29,6 +29,7 @@ import uvicorn
 from recall.cli import main
 from recall.config import SearchConfig
 from recall.db.schema import ensure_schema
+from recall.errors import StartupError
 from recall.server import create_app
 from recall.settings import (
     SETTINGS_VARIABLES,
@@ -516,7 +517,7 @@ class TestSettingsConsumers:
     def test_create_app_fails_when_auth_file_does_not_exist(self, tmp_path: Path) -> None:
         settings = load_settings(_stub_env(RECALL_AUTH_FILE=str(tmp_path / "absent.json")))
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(StartupError, match="RECALL_AUTH_FILE"):
             create_app(settings)
 
     def test_configure_telemetry_reads_endpoint_from_the_mapping(

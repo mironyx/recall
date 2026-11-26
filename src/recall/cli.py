@@ -16,13 +16,13 @@ if TYPE_CHECKING:
 def _cmd_serve(args: argparse.Namespace, env: Mapping[str, str]) -> None:
     """Start the Recall MCP server.
 
-    Wires logging → telemetry → settings → optional auto-migrate → ASGI app → uvicorn.
+    Wires logging → telemetry → settings → ASGI app → optional auto-migrate → uvicorn.
+    The app is composed first (it does not touch the database), so a configuration it
+    cannot serve stops startup before any schema change.
     """
-    import psycopg
     import structlog
 
-    from recall.db.schema import describe_db_error
-    from recall.logging import configure_logging
+    from recall.logging import configure_logging, stack_frames
     from recall.server import create_app
     from recall.settings import load_settings
     from recall.telemetry import configure_telemetry
@@ -33,15 +33,19 @@ def _cmd_serve(args: argparse.Namespace, env: Mapping[str, str]) -> None:
     configure_logging(settings.log_level)
 
     log = structlog.get_logger(__name__)
-    if settings.migrate_on_startup:
-        _migrate_or_exit(settings.database_url, settings.embeddings.dim)
-
     try:
         app = create_app(settings)
     except Exception as exc:
-        detail = describe_db_error(exc) if isinstance(exc, psycopg.Error) else str(exc)
-        log.error("startup_failed", error_type=type(exc).__name__, error=detail)
+        log.error(
+            "startup_failed",
+            error_type=type(exc).__name__,
+            error=_describe_startup_error(exc),
+            frames=stack_frames(exc),
+        )
         sys.exit(1)
+
+    if settings.migrate_on_startup:
+        _migrate_or_exit(settings.database_url, settings.embeddings.dim)
 
     if args.dry_run:
         return
@@ -74,6 +78,21 @@ def _apply_flags(settings: Settings, args: argparse.Namespace) -> Settings:
     return replace(settings, **given)
 
 
+# Justification: only messages known to be free of DATABASE_URL are quoted (LLD I2).
+def _describe_startup_error(exc: Exception) -> str:
+    """The part of a startup failure that is safe to log."""
+    import psycopg
+
+    from recall.db.schema import describe_db_error
+    from recall.errors import StartupError
+
+    if isinstance(exc, StartupError):
+        return str(exc)
+    if isinstance(exc, psycopg.Error):
+        return describe_db_error(exc)
+    return "message withheld as it can quote DATABASE_URL; see frames"
+
+
 # Justification: isolates the auto-migrate failure path (complexity gate).
 def _migrate_or_exit(database_url: str, dims: int) -> None:
     """Auto-migrate for ``serve``; log and exit 1 on failure."""
@@ -82,11 +101,17 @@ def _migrate_or_exit(database_url: str, dims: int) -> None:
     import structlog
 
     from recall.db.schema import describe_db_error, ensure_schema
+    from recall.logging import stack_frames
 
     try:
         asyncio.run(ensure_schema(database_url, dims))
     except Exception as exc:
-        structlog.get_logger(__name__).error("schema_setup_failed", error=describe_db_error(exc))
+        structlog.get_logger(__name__).error(
+            "schema_setup_failed",
+            error_type=type(exc).__name__,
+            error=describe_db_error(exc),
+            frames=stack_frames(exc),
+        )
         sys.exit(1)
 
 

@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 
 import structlog
 
-from recall.errors import EmbeddingError
+from recall.errors import EmbeddingError, StartupError
 
 log = structlog.get_logger()
 
@@ -46,10 +46,10 @@ def validate_dim(provider: EmbeddingsProvider, configured_dim: int) -> None:
     Called at startup wiring; a mismatch raises before any memory operation.
 
     Raises:
-        ValueError: if ``configured_dim`` != ``provider.dim``.
+        StartupError: (a ``ValueError``) if ``configured_dim`` != ``provider.dim``.
     """
     if provider.dim != configured_dim:
-        raise ValueError(
+        raise StartupError(
             f"EMBEDDINGS_DIM={configured_dim} does not match "
             f"{type(provider).__name__}.dim={provider.dim}"
         )

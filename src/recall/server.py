@@ -40,9 +40,9 @@ from recall.config import SearchConfig
 from recall.db.schema import describe_db_error
 from recall.embeddings.provider import guarded_embed, validate_dim
 from recall.embeddings.stub import StubEmbeddingsProvider
-from recall.errors import UnauthenticatedError
+from recall.errors import StartupError, UnauthenticatedError
 from recall.health import healthz, readyz
-from recall.logging import bind_request_context, unbind_request_context
+from recall.logging import bind_request_context, stack_frames, unbind_request_context
 from recall.memory_service import MemoryService
 from recall.storage_adapter import StorageAdapter
 from recall.telemetry import get_trace_context
@@ -295,6 +295,9 @@ def _build_store(
     config is built (LLD §LLD-e1-embedder). ``from_conn_string`` returns an
     async context manager: the connection pool and table setup are deferred
     to the app lifespan, so an unreachable DSN does not break construction.
+
+    Raises:
+        StartupError: if the configured provider is not wired in this build.
     """
     from langgraph.store.postgres import AsyncPostgresStore
     from langgraph.store.postgres.base import PostgresIndexConfig
@@ -302,10 +305,10 @@ def _build_store(
     embeddings = settings.embeddings
     # TODO(REC-16): select the provider with build_provider(embeddings).
     if embeddings.provider != "stub":
-        _log.warning(
-            "embeddings_provider_not_wired",
-            provider=embeddings.provider,
-            hint="this build embeds with the stub provider",
+        raise StartupError(
+            f"EMBEDDINGS_PROVIDER={embeddings.provider} is not available in this build. "
+            "Supported now: stub (tests and local development only). "
+            "openai is added by REC-16, sentence-transformers by REC-17."
         )
     stub = StubEmbeddingsProvider(dim=embeddings.dim)
     # TODO(#91): this check is vacuous — the stub's dim comes from the same
@@ -398,8 +401,21 @@ class StoreUnavailableError(RuntimeError):
     """The store could not be opened at startup. Carries no part of ``DATABASE_URL``."""
 
 
+# Justification: auth file errors reach the operator without quoting the configured path,
+# which holds DATABASE_URL if the two variables are swapped (LLD I2).
+def _load_auth(path: str) -> AuthConfig:
+    """Load the token file, reporting a failure as ``StartupError``."""
+    try:
+        return load_auth_config(path)
+    except OSError as exc:
+        raise StartupError(f"RECALL_AUTH_FILE could not be read: {exc.strerror}") from exc
+    except ValueError as exc:
+        raise StartupError(f"RECALL_AUTH_FILE is invalid: {exc}") from exc
+
+
 # Justification: the server logs a lifespan failure with its traceback, so the driver's
-# message must be replaced before it gets there (LLD I2).
+# message must be replaced before it gets there (LLD I2). The original frames are logged
+# here, without any message.
 @asynccontextmanager
 async def _opened(
     store: AbstractAsyncContextManager[AsyncPostgresStore, bool | None],
@@ -413,6 +429,7 @@ async def _opened(
     except Exception as exc:
         if entered:
             raise
+        _log.error("store_unavailable", error_type=type(exc).__name__, frames=stack_frames(exc))
         raise StoreUnavailableError(describe_db_error(exc)) from None
 
 
@@ -464,12 +481,13 @@ def create_app(settings: Settings) -> Starlette:
     ``settings.database_url`` with the stub embedder, the
     MemoryService → StorageAdapter → store chain behind a :class:`ToolRouter`,
     and the lowlevel MCP server. The store pool and the dispatcher task group
-    run for the app's lifetime (see :func:`_build_lifespan`).
+    run for the app's lifetime (see :func:`_build_lifespan`). Nothing here
+    connects to the database, so ``serve`` composes the app before migrating.
 
     ``settings.database_url`` is stashed on ``app.state.conn_string`` so the health
     handlers can reach it without module-level state.
     """
-    auth_config = load_auth_config(settings.auth_file)
+    auth_config = _load_auth(settings.auth_file)
     store = _build_store(settings)
     mcp_runtime = _McpRuntime()
     mcp_server = _build_mcp_server(auth_config, mcp_runtime)
