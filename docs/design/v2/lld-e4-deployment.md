@@ -824,7 +824,8 @@ async def check_vector_dim(conn_string: str, configured: int) -> None   # raises
 
 CLI: one helper `_prepare_database(database_url, dim, *, migrate: bool) -> None` runs
 `check_vector_dim` and then, if `migrate`, `ensure_schema`. Both commands call it
-(`db migrate` with `migrate=True`). `VectorDimMismatchError` → stderr message, exit 1; other
+(`db migrate` with `migrate=True`). `serve` calls it after `create_app`, as it does
+`ensure_schema` today (§4.1). `VectorDimMismatchError` → stderr message, exit 1; other
 errors keep today's `schema_setup_failed` handling.
 
 > **Constraint:** `serve` now always connects to Postgres before listening.
@@ -931,7 +932,7 @@ def get_trace_context() -> tuple[str, str]  # unchanged
 ```
 
 CLI order: `configure_logging` → `enabled = configure_telemetry(env)` →
-`load_settings` → `_prepare_database` → `create_app` → `if enabled: instrument_app(app)` →
+`load_settings` → `create_app` → `_prepare_database` → `if enabled: instrument_app(app)` →
 uvicorn. `span_exporter` is a genuine behavioural dependency for tests (in-memory exporter),
 not an HTTP seam.
 
